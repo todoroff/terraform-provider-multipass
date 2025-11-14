@@ -240,3 +240,37 @@ func sanitizeIPs(values []string) []string {
 	}
 	return out
 }
+
+type snapshotListResponse struct {
+	Errors []any                                  `json:"errors"`
+	Info   map[string]map[string]snapshotEntry    `json:"info"`
+}
+
+type snapshotEntry struct {
+	Comment string `json:"comment"`
+	Parent  string `json:"parent"`
+}
+
+func (r snapshotListResponse) toModel(instanceFilter string) []models.Snapshot {
+	out := []models.Snapshot{}
+	for instance, snaps := range r.Info {
+		if instanceFilter != "" && instance != instanceFilter {
+			continue
+		}
+		for name, entry := range snaps {
+			out = append(out, models.Snapshot{
+				Instance: instance,
+				Name:     name,
+				Comment:  entry.Comment,
+				Parent:   entry.Parent,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Instance == out[j].Instance {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Instance < out[j].Instance
+	})
+	return out
+}

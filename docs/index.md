@@ -33,6 +33,7 @@ The following arguments are supported in the `provider "multipass"` block:
 
 - `multipass_instance` – Manage VM lifecycle, networks, mounts, and metadata.
 - `multipass_alias` – Expose commands from instances as host aliases.
+- `multipass_snapshot` – Manage named snapshots for stopped instances.
 
 ## Data Sources
 

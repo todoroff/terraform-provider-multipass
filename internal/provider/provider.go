@@ -146,6 +146,7 @@ func (p *MultipassProvider) Resources(_ context.Context) []func() resource.Resou
 	return []func() resource.Resource{
 		NewInstanceResource,
 		NewAliasResource,
+		NewSnapshotResource,
 	}
 }
 
@@ -155,6 +156,7 @@ func (p *MultipassProvider) DataSources(_ context.Context) []func() datasource.D
 		NewImagesDataSource,
 		NewNetworksDataSource,
 		NewInstanceDataSource,
+		NewSnapshotsDataSource,
 	}
 }
 

@@ -32,6 +32,9 @@ type Client interface {
 	ListAliases(ctx context.Context, refresh bool) ([]models.Alias, error)
 	CreateAlias(ctx context.Context, alias models.Alias) error
 	DeleteAlias(ctx context.Context, name string) error
+	ListSnapshots(ctx context.Context, instance string) ([]models.Snapshot, error)
+	CreateSnapshot(ctx context.Context, instance, name, comment string) (string, error)
+	DeleteSnapshot(ctx context.Context, instance, name string, purge bool) error
 }
 
 // Config controls the multipass CLI client instantiation.
@@ -328,6 +331,66 @@ func (c *client) DeleteAlias(ctx context.Context, name string) error {
 		return err
 	}
 	c.invalidateAliases()
+	return nil
+}
+
+func (c *client) ListSnapshots(ctx context.Context, instance string) ([]models.Snapshot, error) {
+	var payload snapshotListResponse
+	if err := c.runJSON(ctx, &payload, "list", "--snapshots"); err != nil {
+		return nil, err
+	}
+	return payload.toModel(instance), nil
+}
+
+func (c *client) CreateSnapshot(ctx context.Context, instance, name, comment string) (string, error) {
+	if instance == "" {
+		return "", fmt.Errorf("instance name is required for snapshots")
+	}
+	args := []string{"snapshot"}
+	if name != "" {
+		args = append(args, "--name", name)
+	}
+	if comment != "" {
+		args = append(args, "--comment", comment)
+	}
+	args = append(args, instance)
+
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+
+	// Output format: "Snapshot taken: instance.snapshotName"
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		// Fall back to the requested name.
+		return name, nil
+	}
+	parts := strings.Split(line, ":")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if last == "" {
+		return name, nil
+	}
+	// last is "instance.snapshot"
+	if dot := strings.Index(last, "."); dot != -1 && dot+1 < len(last) {
+		return last[dot+1:], nil
+	}
+	return name, nil
+}
+
+func (c *client) DeleteSnapshot(ctx context.Context, instance, name string, purge bool) error {
+	if instance == "" || name == "" {
+		return fmt.Errorf("instance and snapshot name are required")
+	}
+	target := fmt.Sprintf("%s.%s", instance, name)
+	args := []string{"delete"}
+	if purge {
+		args = append(args, "--purge")
+	}
+	args = append(args, target)
+	if _, err := c.run(ctx, args...); err != nil {
+		return err
+	}
 	return nil
 }
 
