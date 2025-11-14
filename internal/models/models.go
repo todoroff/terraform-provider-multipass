@@ -28,6 +28,14 @@ type Mount struct {
 	ReadOnly     bool
 }
 
+// Snapshot represents a Multipass snapshot associated with an instance.
+type Snapshot struct {
+	Instance string
+	Name     string
+	Comment  string
+	Parent   string
+}
+
 // ImageKind identifies whether an entry originates from regular images or blueprints.
 type ImageKind string
 
