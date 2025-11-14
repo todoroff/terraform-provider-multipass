@@ -1,0 +1,25 @@
+# Go build artifacts
+bin/
+build/
+dist/
+coverage.out
+
+# Go modules
+vendor/
+
+# Terraform / OpenTofu
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Editor/OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
