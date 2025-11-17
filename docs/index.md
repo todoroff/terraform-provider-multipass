@@ -34,6 +34,8 @@ The following arguments are supported in the `provider "multipass"` block:
 - `multipass_instance` – Manage VM lifecycle, networks, mounts, and metadata.
 - `multipass_alias` – Expose commands from instances as host aliases.
 - `multipass_snapshot` – Manage named snapshots for stopped instances.
+- `multipass_file_upload` – Provision files or directories into instances using `multipass transfer`.
+- `multipass_file_download` – Pull files or directories from instances onto the host.
 
 ## Data Sources
 

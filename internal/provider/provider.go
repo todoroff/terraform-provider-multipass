@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/hashicorp/go-version"
@@ -39,6 +40,7 @@ type MultipassProvider struct {
 
 	mu     sync.RWMutex
 	client multipasscli.Client
+	hostOS string
 }
 
 // Metadata sets the provider type name and version exposed to Terraform.
@@ -132,11 +134,13 @@ func (p *MultipassProvider) Configure(ctx context.Context, req provider.Configur
 
 	p.mu.Lock()
 	p.client = client
+	p.hostOS = runtime.GOOS
 	p.mu.Unlock()
 
 	resp.ResourceData = providerData{
 		client:       client,
 		defaultImage: cfg.DefaultImage,
+		hostOS:       p.hostOS,
 	}
 	resp.DataSourceData = resp.ResourceData
 }
@@ -147,6 +151,8 @@ func (p *MultipassProvider) Resources(_ context.Context) []func() resource.Resou
 		NewInstanceResource,
 		NewAliasResource,
 		NewSnapshotResource,
+		NewFileUploadResource,
+		NewFileDownloadResource,
 	}
 }
 

@@ -21,6 +21,7 @@ type Client interface {
 	ListInstances(ctx context.Context, refresh bool) ([]models.Instance, error)
 	GetInstance(ctx context.Context, name string) (*models.Instance, error)
 	LaunchInstance(ctx context.Context, opts models.LaunchOptions) error
+	Exec(ctx context.Context, instance string, command []string) error
 	StartInstance(ctx context.Context, name string) error
 	StopInstance(ctx context.Context, name string, force bool) error
 	SuspendInstance(ctx context.Context, name string) error
@@ -36,6 +37,8 @@ type Client interface {
 	ListSnapshots(ctx context.Context, instance string) ([]models.Snapshot, error)
 	CreateSnapshot(ctx context.Context, instance, name, comment string) (string, error)
 	DeleteSnapshot(ctx context.Context, instance, name string, purge bool) error
+	Transfer(ctx context.Context, opts TransferOptions) error
+	TransferCapture(ctx context.Context, opts TransferOptions) ([]byte, error)
 }
 
 // Config controls the multipass CLI client instantiation.
@@ -54,6 +57,14 @@ type client struct {
 	imageCache    *cacheEntry[[]models.Image]
 	networkCache  *cacheEntry[[]models.Network]
 	aliasCache    *cacheEntry[[]models.Alias]
+}
+
+// TransferOptions controls multipass transfer behavior.
+type TransferOptions struct {
+	Sources     []string
+	Destination string
+	Recursive   bool
+	Parents     bool
 }
 
 const (
@@ -206,6 +217,23 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 	}
 
 	c.invalidateInstances()
+	return nil
+}
+
+func (c *client) Exec(ctx context.Context, instance string, command []string) error {
+	if instance == "" {
+		return fmt.Errorf("instance name is required for exec")
+	}
+	if len(command) == 0 {
+		return fmt.Errorf("exec command cannot be empty")
+	}
+
+	args := []string{"exec", instance, "--"}
+	args = append(args, command...)
+
+	if _, err := c.run(ctx, args...); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -435,6 +463,47 @@ func (c *client) DeleteSnapshot(ctx context.Context, instance, name string, purg
 		return err
 	}
 	return nil
+}
+
+func (c *client) Transfer(ctx context.Context, opts TransferOptions) error {
+	if len(opts.Sources) == 0 {
+		return fmt.Errorf("at least one source is required for transfer")
+	}
+	if opts.Destination == "" {
+		return fmt.Errorf("destination path is required for transfer")
+	}
+
+	args := buildTransferArgs(opts)
+
+	if _, err := c.run(ctx, args...); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *client) TransferCapture(ctx context.Context, opts TransferOptions) ([]byte, error) {
+	if len(opts.Sources) == 0 {
+		return nil, fmt.Errorf("at least one source is required for transfer")
+	}
+	if opts.Destination == "" {
+		return nil, fmt.Errorf("destination path is required for transfer")
+	}
+
+	args := buildTransferArgs(opts)
+	return c.run(ctx, args...)
+}
+
+func buildTransferArgs(opts TransferOptions) []string {
+	args := []string{"transfer"}
+	if opts.Recursive {
+		args = append(args, "--recursive")
+	}
+	if opts.Parents {
+		args = append(args, "--parents")
+	}
+	args = append(args, opts.Sources...)
+	args = append(args, opts.Destination)
+	return args
 }
 
 func (c *client) runSimple(ctx context.Context, args ...string) error {
