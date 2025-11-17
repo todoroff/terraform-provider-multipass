@@ -4,7 +4,7 @@ terraform {
   required_providers {
     multipass = {
       source  = "todoroff/multipass"
-      version = "1.0.0"
+      version = ">= 1.2.0"
     }
   }
 }
