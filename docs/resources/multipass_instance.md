@@ -28,6 +28,38 @@ resource "multipass_instance" "dev" {
 }
 ```
 
+Inline cloud-init can be supplied directly from Terraform expressions:
+
+```hcl
+resource "multipass_instance" "inline" {
+  name   = "dev-inline"
+  image  = "24.04"
+
+  cloud_init = file("${path.module}/cloud-init.yaml")
+}
+```
+
+For dynamic cloud-init content, render a template using `templatefile`:
+
+```hcl
+locals {
+  rendered_cloud_init = templatefile("${path.module}/cloud-init.tpl", {
+    username = "ci-runner"
+    motd     = "Runner ready!"
+  })
+}
+
+resource "multipass_instance" "templated" {
+  name   = "dev-templated"
+  image  = "24.04"
+  cpus   = 2
+
+  cloud_init = local.rendered_cloud_init
+}
+```
+
+See `examples/cloud-init-lab` for a full template-driven setup.
+
 ## Argument Reference
 
 | Name              | Type    | Required | Description |
@@ -37,7 +69,8 @@ resource "multipass_instance" "dev" {
 | `cpus`            | Number  | No       | Virtual CPU count. Forces recreation. |
 | `memory`          | String  | No       | Memory size (`1G`, `512M`, etc.). Forces recreation. |
 | `disk`            | String  | No       | Disk size (e.g., `15G`). Forces recreation. |
-| `cloud_init_file` | String  | No       | Path to cloud-init YAML applied at launch. Forces recreation. |
+| `cloud_init_file` | String  | No       | Path to cloud-init YAML applied at launch. Mutually exclusive with `cloud_init`. Forces recreation. |
+| `cloud_init`      | String  | No       | Inline cloud-init YAML applied at launch. Mutually exclusive with `cloud_init_file`. Forces recreation. |
 | `primary`         | Bool    | No       | If true, mark instance as Multipass primary. |
 | `auto_recover`    | Bool    | No       | Attempt to `multipass recover` if the instance is soft-deleted outside Terraform. |
 | `networks`        | Block   | No       | Optional repeated block configuring host networks. Attributes: `name` (required), `mode`, `mac`. |

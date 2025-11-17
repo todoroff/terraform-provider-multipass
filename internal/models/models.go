@@ -73,15 +73,16 @@ type Alias struct {
 
 // LaunchOptions controls instance creation parameters.
 type LaunchOptions struct {
-	Name          string
-	Image         string
-	CPUs          int
-	Memory        string
-	Disk          string
-	CloudInitFile string
-	Networks      []NetworkAttachment
-	Mounts        []Mount
-	Primary       bool
+	Name            string
+	Image           string
+	CPUs            int
+	Memory          string
+	Disk            string
+	CloudInitFile   string
+	CloudInitInline string
+	Networks        []NetworkAttachment
+	Mounts          []Mount
+	Primary         bool
 }
 
 // NetworkAttachment describes a network interface to attach during launch.

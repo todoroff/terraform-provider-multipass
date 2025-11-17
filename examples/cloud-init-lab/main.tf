@@ -4,13 +4,17 @@ terraform {
   required_providers {
     multipass = {
       source  = "todoroff/multipass"
-      version = "1.0.0"
+      version = ">= 1.2.0"
     }
   }
 }
 
 locals {
-  cloud_init_file = "${path.module}/cloud-init.yaml"
+  cloud_init_file_path = "${path.module}/cloud-init.yaml"
+  templated_cloud_init = templatefile("${path.module}/cloud-init.tpl", {
+    username = "ci-runner"
+    motd     = "Runner ready!"
+  })
 }
 
 resource "multipass_instance" "builder" {
@@ -19,7 +23,7 @@ resource "multipass_instance" "builder" {
   cpus            = 2
   memory          = "4G"
   disk            = "15G"
-  cloud_init_file = local.cloud_init_file
+  cloud_init_file = local.cloud_init_file_path
 
   mounts {
     host_path     = "/home/USERNAME/builds"
@@ -28,12 +32,12 @@ resource "multipass_instance" "builder" {
 }
 
 resource "multipass_instance" "runner" {
-  name            = "ci-runner"
-  image           = "lts"
-  cpus            = 2
-  memory          = "3G"
-  disk            = "12G"
-  cloud_init_file = local.cloud_init_file
+  name       = "ci-runner"
+  image      = "lts"
+  cpus       = 2
+  memory     = "3G"
+  disk       = "12G"
+  cloud_init = local.templated_cloud_init
 
   depends_on = [multipass_instance.builder]
 }
