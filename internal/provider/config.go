@@ -21,4 +21,5 @@ type providerConfig struct {
 type providerData struct {
 	client       multipasscli.Client
 	defaultImage string
+	hostOS       string
 }

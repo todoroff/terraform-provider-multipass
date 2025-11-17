@@ -24,5 +24,11 @@ Showcases cloud-init automation:
 - Combines mounts, aliases, and outputs capturing instance IPs.
 - Illustrates per-instance metadata adoption (tags via Terraform locals and outputs).
 
+## 5. `file-provisioner/`
+Provisioner-style workflow using the native `multipass_file_upload` and `multipass_file_download` resources:
+- Uploads a shell script from disk, an inline `.env` file, and an entire directory tree.
+- Downloads those same artifacts back onto the host, showcasing directory recursion and `triggers`.
+- Ideal starting point if you're replacing Terraform's `file` provisioner (or `null_resource` download hacks).
+
 Each subdirectory contains a `main.tf` (and supporting files where needed). Run `terraform init` (or `tofu init`) inside any example directory and the published provider will be installed automatically.
 

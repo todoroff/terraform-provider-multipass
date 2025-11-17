@@ -65,6 +65,8 @@ resource "multipass_alias" "shell" {
 
 - `multipass_instance`: manages VM lifecycle. Supports optional `networks` and `mounts` nested blocks, cloud-init file references, and auto-recovery semantics.
 - `multipass_alias`: creates host aliases executing commands inside instances.
+- `multipass_file_upload`: provision-style file or directory uploads backed by `multipass transfer`, an alternative to Terraform provisioners.
+- `multipass_file_download`: pull files or directories from Multipass instances back to the host with Terraform-managed lifecycles.
 
 ## Data Sources
 

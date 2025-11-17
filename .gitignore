@@ -13,6 +13,7 @@ vendor/
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+examples/file-provisioner/downloads/
 
 # Editor/OS noise
 .DS_Store
