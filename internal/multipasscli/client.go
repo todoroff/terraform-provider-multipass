@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -135,6 +136,24 @@ func (c *client) GetInstance(ctx context.Context, name string) (*models.Instance
 }
 
 func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) error {
+	if opts.CloudInitInline != "" && opts.CloudInitFile != "" {
+		return fmt.Errorf("only one of CloudInitInline or CloudInitFile may be set")
+	}
+
+	cloudInitPath := opts.CloudInitFile
+	var cleanup func()
+	if opts.CloudInitInline != "" {
+		path, closer, err := writeTempCloudInit(opts.CloudInitInline)
+		if err != nil {
+			return err
+		}
+		cloudInitPath = path
+		cleanup = closer
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
 	args := []string{"launch"}
 	if opts.Name != "" {
 		args = append(args, "--name", opts.Name)
@@ -151,8 +170,8 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 	if opts.Disk != "" {
 		args = append(args, "--disk", opts.Disk)
 	}
-	if opts.CloudInitFile != "" {
-		args = append(args, "--cloud-init", opts.CloudInitFile)
+	if cloudInitPath != "" {
+		args = append(args, "--cloud-init", cloudInitPath)
 	}
 	for _, net := range opts.Networks {
 		if net.Name == "" {
@@ -188,6 +207,30 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 
 	c.invalidateInstances()
 	return nil
+}
+
+func writeTempCloudInit(content string) (string, func(), error) {
+	file, err := os.CreateTemp("", "tf-multipass-cloud-init-*.yaml")
+	if err != nil {
+		return "", nil, fmt.Errorf("unable to create temporary cloud-init file: %w", err)
+	}
+
+	cleanup := func() {
+		_ = os.Remove(file.Name())
+	}
+
+	if _, err := file.WriteString(content); err != nil {
+		file.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("unable to write temporary cloud-init file: %w", err)
+	}
+
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("unable to flush temporary cloud-init file: %w", err)
+	}
+
+	return file.Name(), cleanup, nil
 }
 
 func (c *client) StartInstance(ctx context.Context, name string) error {

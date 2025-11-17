@@ -94,8 +94,17 @@ func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"cloud_init_file": schema.StringAttribute{
 				Optional:            true,
-				Description:         "Path to a cloud-init YAML file applied at launch. Forces recreation.",
-				MarkdownDescription: "Path to a cloud-init YAML file applied at launch. Forces recreation.",
+				Description:         "Path to a cloud-init YAML file applied at launch. Mutually exclusive with `cloud_init`. Forces recreation.",
+				MarkdownDescription: "Path to a cloud-init YAML file applied at launch. Mutually exclusive with `cloud_init`. Forces recreation.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"cloud_init": schema.StringAttribute{
+				Optional:            true,
+				Sensitive:           true,
+				Description:         "Inline cloud-init YAML applied at launch. Mutually exclusive with `cloud_init_file`. Forces recreation.",
+				MarkdownDescription: "Inline cloud-init YAML applied at launch. Mutually exclusive with `cloud_init_file`. Forces recreation.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -204,16 +213,26 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	if hasStringValue(plan.CloudInitFile) && hasStringValue(plan.CloudInit) {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cloud_init"),
+			"Conflicting cloud-init configuration",
+			"Only one of cloud_init or cloud_init_file can be set. Remove one of the attributes and try again.",
+		)
+		return
+	}
+
 	opts := models.LaunchOptions{
-		Name:          plan.Name.ValueString(),
-		Image:         r.resolveImage(plan.Image),
-		CPUs:          valueOrDefaultInt(plan.CPUs, 1),
-		Memory:        valueOrDefaultString(plan.Memory, "1G"),
-		Disk:          valueOrDefaultString(plan.Disk, "5G"),
-		CloudInitFile: plan.CloudInitFile.ValueString(),
-		Networks:      expandNetworkAttachments(plan.Networks),
-		Mounts:        expandMounts(plan.Mounts),
-		Primary:       plan.Primary.ValueBool(),
+		Name:            plan.Name.ValueString(),
+		Image:           r.resolveImage(plan.Image),
+		CPUs:            valueOrDefaultInt(plan.CPUs, 1),
+		Memory:          valueOrDefaultString(plan.Memory, "1G"),
+		Disk:            valueOrDefaultString(plan.Disk, "5G"),
+		CloudInitFile:   valueOrEmpty(plan.CloudInitFile),
+		CloudInitInline: valueOrEmpty(plan.CloudInit),
+		Networks:        expandNetworkAttachments(plan.Networks),
+		Mounts:          expandMounts(plan.Mounts),
+		Primary:         plan.Primary.ValueBool(),
 	}
 
 	if err := r.client.LaunchInstance(ctx, opts); err != nil {
@@ -299,6 +318,15 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if hasStringValue(plan.CloudInitFile) && hasStringValue(plan.CloudInit) {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cloud_init"),
+			"Conflicting cloud-init configuration",
+			"Only one of cloud_init or cloud_init_file can be set. Remove one of the attributes and try again.",
+		)
 		return
 	}
 
@@ -389,6 +417,7 @@ type instanceResourceModel struct {
 	Memory        types.String         `tfsdk:"memory"`
 	Disk          types.String         `tfsdk:"disk"`
 	CloudInitFile types.String         `tfsdk:"cloud_init_file"`
+	CloudInit     types.String         `tfsdk:"cloud_init"`
 	Primary       types.Bool           `tfsdk:"primary"`
 	AutoRecover   types.Bool           `tfsdk:"auto_recover"`
 	Networks      []networkConfigModel `tfsdk:"networks"`
@@ -446,6 +475,10 @@ func valueOrEmpty(v types.String) string {
 		return ""
 	}
 	return v.ValueString()
+}
+
+func hasStringValue(v types.String) bool {
+	return !v.IsNull() && !v.IsUnknown() && v.ValueString() != ""
 }
 
 func valueOrDefaultString(v types.String, def string) string {
