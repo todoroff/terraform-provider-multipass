@@ -120,6 +120,11 @@ func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description:         "Attempt to recover the instance if it becomes deleted outside Terraform.",
 				MarkdownDescription: "Attempt to recover the instance if it becomes deleted outside Terraform.",
 			},
+			"auto_start_on_recover": schema.BoolAttribute{
+				Optional:            true,
+				Description:         "If true, automatically start the instance after a successful auto-recover when it was soft-deleted outside Terraform.",
+				MarkdownDescription: "If true, automatically start the instance after a successful auto-recover when it was soft-deleted outside Terraform.",
+			},
 			"ipv4": schema.ListAttribute{
 				Computed:            true,
 				Description:         "Assigned IPv4 addresses.",
@@ -278,6 +283,15 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 			return
 		}
 		instance, err = r.client.GetInstance(ctx, name)
+
+		// Optionally start the instance after a successful recover.
+		if err == nil && state.AutoStartOnRecover.ValueBool() && !strings.EqualFold(instance.State, "Running") {
+			if startErr := r.client.StartInstance(ctx, name); startErr != nil {
+				resp.Diagnostics.AddWarning("Failed to auto-start instance after recover", startErr.Error())
+			} else {
+				instance, err = r.client.GetInstance(ctx, name)
+			}
+		}
 	}
 
 	if err != nil {
@@ -301,6 +315,19 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 			if err != nil {
 				resp.Diagnostics.AddError("Failed to read instance after auto-recover", err.Error())
 				return
+			}
+
+			// Optionally start the instance after a successful recover from Deleted state.
+			if state.AutoStartOnRecover.ValueBool() && !strings.EqualFold(instance.State, "Running") {
+				if startErr := r.client.StartInstance(ctx, name); startErr != nil {
+					resp.Diagnostics.AddWarning("Failed to auto-start instance after recover", startErr.Error())
+				} else {
+					instance, err = r.client.GetInstance(ctx, name)
+					if err != nil {
+						resp.Diagnostics.AddError("Failed to read instance after auto-start", err.Error())
+						return
+					}
+				}
 			}
 		}
 	}
@@ -424,24 +451,25 @@ type mountConfigModel struct {
 }
 
 type instanceResourceModel struct {
-	ID            types.String         `tfsdk:"id"`
-	Name          types.String         `tfsdk:"name"`
-	Image         types.String         `tfsdk:"image"`
-	CPUs          types.Int64          `tfsdk:"cpus"`
-	Memory        types.String         `tfsdk:"memory"`
-	Disk          types.String         `tfsdk:"disk"`
-	CloudInitFile types.String         `tfsdk:"cloud_init_file"`
-	CloudInit     types.String         `tfsdk:"cloud_init"`
-	Primary       types.Bool           `tfsdk:"primary"`
-	AutoRecover   types.Bool           `tfsdk:"auto_recover"`
-	Networks      []networkConfigModel `tfsdk:"networks"`
-	Mounts        []mountConfigModel   `tfsdk:"mounts"`
-	IPv4          types.List           `tfsdk:"ipv4"`
-	State         types.String         `tfsdk:"state"`
-	Release       types.String         `tfsdk:"release"`
-	ImageRelease  types.String         `tfsdk:"image_release"`
-	SnapshotCount types.Int64          `tfsdk:"snapshot_count"`
-	LastUpdated   types.String         `tfsdk:"last_updated"`
+	ID                 types.String         `tfsdk:"id"`
+	Name               types.String         `tfsdk:"name"`
+	Image              types.String         `tfsdk:"image"`
+	CPUs               types.Int64          `tfsdk:"cpus"`
+	Memory             types.String         `tfsdk:"memory"`
+	Disk               types.String         `tfsdk:"disk"`
+	CloudInitFile      types.String         `tfsdk:"cloud_init_file"`
+	CloudInit          types.String         `tfsdk:"cloud_init"`
+	Primary            types.Bool           `tfsdk:"primary"`
+	AutoRecover        types.Bool           `tfsdk:"auto_recover"`
+	AutoStartOnRecover types.Bool           `tfsdk:"auto_start_on_recover"`
+	Networks           []networkConfigModel `tfsdk:"networks"`
+	Mounts             []mountConfigModel   `tfsdk:"mounts"`
+	IPv4               types.List           `tfsdk:"ipv4"`
+	State              types.String         `tfsdk:"state"`
+	Release            types.String         `tfsdk:"release"`
+	ImageRelease       types.String         `tfsdk:"image_release"`
+	SnapshotCount      types.Int64          `tfsdk:"snapshot_count"`
+	LastUpdated        types.String         `tfsdk:"last_updated"`
 }
 
 func (r *instanceResource) resolveImage(image types.String) string {
