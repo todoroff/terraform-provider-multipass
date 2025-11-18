@@ -4,12 +4,13 @@
 
 ## Features
 
-- Provider-level configuration for CLI discovery, timeouts, and default images.
-- `multipass_instance` resource with support for CPU/memory/disk sizing, networks, host mounts, cloud-init, and optional primary designation.
-- `multipass_alias` resource for ergonomic host-side shortcuts.
-- Data sources for available images/blueprints, host networks, and existing instances.
-- CLI abstraction with caching, JSON parsing, and actionable error messages.
-- Unit tests for core parsing logic and provider helpers, plus ready-to-run Go test suite.
+- Provider configuration for CLI discovery, command timeouts, default images, and cached `multipass` metadata.
+- `multipass_instance` resource with CPU/memory/disk sizing, multiple networks, host mounts, and inline or file-based cloud-init.
+- `multipass_snapshot` resource for managing named snapshots (create/list/delete/import).
+- `multipass_alias` resource for ergonomic host shortcuts into instances.
+- `multipass_file_upload` and `multipass_file_download` resources for Terraform-managed file transfers without provisioners.
+- Data sources for images, networks, instances, and snapshots to compose dynamic plans.
+- Parser-backed CLI abstraction with detailed diagnostics.
 
 ## Getting Started
 
@@ -73,6 +74,7 @@ resource "multipass_alias" "shell" {
 - `multipass_images`: enumerates images/blueprints from `multipass find`, with filters for name, alias, kind, and text query.
 - `multipass_networks`: lists bridgable host networks.
 - `multipass_instance`: inspects an existing instance for read-only data.
+- `multipass_snapshots`: returns snapshots for a target instance with optional name filtering.
 
 ## Examples
 
@@ -96,7 +98,7 @@ go build ./cmd/terraform-provider-multipass
 ### CI & Releases
 
 - CI runs on GitHub Actions (`.github/workflows/ci.yml`) and executes `go test ./...` across a small matrix of Go versions and OSes.
-- Tagged releases (`vX.Y.Z`) trigger GoReleaser (`.goreleaser.yml`) via `.github/workflows/release.yml`, which builds cross-platform artifacts suitable for attaching to GitHub Releases and publishing to the Terraform/OpenTofu registries.
+- Tagged releases (`X.Y.Z`) trigger GoReleaser (`.goreleaser.yml`) via `.github/workflows/release.yml`, which builds cross-platform artifacts suitable for attaching to GitHub Releases and publishing to the Terraform/OpenTofu registries.
 
 ## License
 
