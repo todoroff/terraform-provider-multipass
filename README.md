@@ -47,35 +47,17 @@ resource "multipass_instance" "dev" {
   memory = "4G"
   disk   = "15G"
 
-  # Attach to a specific host NIC from `multipass networks`
-  # and use a stable MAC to allow deterministic DHCP or
-  # guest-side static IP configuration (e.g., via cloud-init).
   networks {
     name = "en0"
-    mode = "manual"
-    mac  = "52:54:00:4b:ab:bd"
+    mode = "manual"            #optional
+    mac  = "52:54:00:4b:ab:bd" #optional
   }
 
-  # Example: inline cloud-init that could configure a static
-  # IP for the MAC above using Netplan. Replace the content
-  # with your own cloud-init YAML.
-  cloud_init = <<-EOT
-    #cloud-config
-    write_files:
-      - path: /etc/netplan/10-custom.yaml
-        permissions: "0644"
-        content: |
-          network:
-            version: 2
-            ethernets:
-              extra0:
-                dhcp4: no
-                match:
-                  macaddress: "52:54:00:4b:ab:bd"
-                addresses: ["192.168.64.97/24"]
-    runcmd:
-      - netplan apply
-  EOT
+  mounts {
+    host_path     = "/home/shared"
+    instance_path = "/srv/hostshared"
+    read_only     = false             # optional
+  }
 }
 
 resource "multipass_alias" "shell" {
