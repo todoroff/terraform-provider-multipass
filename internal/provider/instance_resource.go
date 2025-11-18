@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"regexp"
+	"strings"
 	"time"
 
 	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -268,17 +269,15 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	name := state.Name.ValueString()
 	instance, err := r.client.GetInstance(ctx, name)
-	if err != nil {
-		if err == multipasscli.ErrNotFound {
-			if state.AutoRecover.ValueBool() {
-				if recErr := r.client.RecoverInstance(ctx, name); recErr != nil {
-					resp.Diagnostics.AddWarning("Failed to auto-recover instance", recErr.Error())
-					resp.State.RemoveResource(ctx)
-					return
-				}
-				instance, err = r.client.GetInstance(ctx, name)
-			}
+
+	// If the instance is missing and auto_recover is enabled, attempt a recover.
+	if err == multipasscli.ErrNotFound && state.AutoRecover.ValueBool() {
+		if recErr := r.client.RecoverInstance(ctx, name); recErr != nil {
+			resp.Diagnostics.AddWarning("Failed to auto-recover instance", recErr.Error())
+			resp.State.RemoveResource(ctx)
+			return
 		}
+		instance, err = r.client.GetInstance(ctx, name)
 	}
 
 	if err != nil {
@@ -289,6 +288,21 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		}
 		resp.Diagnostics.AddError("Failed to read instance", err.Error())
 		return
+	}
+
+	// Multipass keeps "soft-deleted" instances around with a Deleted state that can be
+	// recovered via `multipass recover`. If auto_recover is enabled, transparently
+	// recover such instances so Terraform can continue managing them.
+	if state.AutoRecover.ValueBool() && strings.EqualFold(instance.State, "Deleted") {
+		if recErr := r.client.RecoverInstance(ctx, name); recErr != nil {
+			resp.Diagnostics.AddWarning("Failed to auto-recover soft-deleted instance", recErr.Error())
+		} else {
+			instance, err = r.client.GetInstance(ctx, name)
+			if err != nil {
+				resp.Diagnostics.AddError("Failed to read instance after auto-recover", err.Error())
+				return
+			}
+		}
 	}
 
 	state.State = types.StringValue(instance.State)
