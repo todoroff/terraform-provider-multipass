@@ -75,7 +75,7 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | `auto_recover`    | Bool    | No       | Attempt to `multipass recover` if the instance is soft-deleted outside Terraform. |
 | `auto_start_on_recover` | Bool | No    | If true, automatically start the instance after a successful `auto_recover`. |
 | `networks`        | Block   | No       | Optional repeated block configuring host networks. Attributes: `name` (required), `mode`, `mac`. |
-| `mounts`          | Block   | No       | Optional repeated block configuring host mounts at launch. Attributes: `host_path`, `instance_path`, `read_only`. |
+| `mounts`          | Block   | No       | Optional repeated block configuring host mounts. Attributes: `host_path`, `instance_path`, `read_only`. |
 
 ## Attributes Reference
 

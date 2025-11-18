@@ -98,10 +98,11 @@ func (r infoResponse) toModel(name string) (*models.Instance, error) {
 
 	mounts := make([]models.Mount, 0, len(entry.Mounts))
 	for target, m := range entry.Mounts {
+		instancePath, readOnly := parseMountTarget(target, m.ReadOnly)
 		mounts = append(mounts, models.Mount{
 			HostPath:     m.SourcePath,
-			InstancePath: target,
-			ReadOnly:     m.ReadOnly,
+			InstancePath: instancePath,
+			ReadOnly:     readOnly,
 		})
 	}
 	sort.Slice(mounts, func(i, j int) bool {
@@ -241,9 +242,19 @@ func sanitizeIPs(values []string) []string {
 	return out
 }
 
+func parseMountTarget(target string, explicitReadOnly bool) (string, bool) {
+	readOnly := explicitReadOnly
+	path := target
+	if strings.HasSuffix(path, ":ro") {
+		path = strings.TrimSuffix(path, ":ro")
+		readOnly = true
+	}
+	return path, readOnly
+}
+
 type snapshotListResponse struct {
-	Errors []any                                  `json:"errors"`
-	Info   map[string]map[string]snapshotEntry    `json:"info"`
+	Errors []any                               `json:"errors"`
+	Info   map[string]map[string]snapshotEntry `json:"info"`
 }
 
 type snapshotEntry struct {

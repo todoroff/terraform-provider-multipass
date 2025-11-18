@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -160,6 +161,9 @@ func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 		Blocks: map[string]schema.Block{
 			"networks": schema.ListNestedBlock{
 				Description: "Optional networks to attach during launch.",
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.RequiresReplace(),
+				},
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
@@ -332,19 +336,10 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		}
 	}
 
-	state.State = types.StringValue(instance.State)
-	state.Release = types.StringValue(instance.Release)
-	state.ImageRelease = types.StringValue(instance.ImageRelease)
-	state.SnapshotCount = types.Int64Value(int64(instance.SnapshotCount))
-	state.LastUpdated = types.StringValue(instance.LastUpdated.UTC().Format(time.RFC3339))
-	if len(instance.IPv4) > 0 {
-		list, diag := types.ListValueFrom(ctx, types.StringType, instance.IPv4)
-		resp.Diagnostics.Append(diag...)
-		state.IPv4 = list
-	} else {
-		state.IPv4 = types.ListNull(types.StringType)
+	resp.Diagnostics.Append(applyInstanceToModel(ctx, instance, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -375,6 +370,24 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		if err := r.client.SetPrimary(ctx, plan.Name.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to set primary", err.Error())
 			return
+		}
+	}
+
+	toAdd, toRemove := diffMounts(plan.Mounts, state.Mounts)
+	if len(toAdd) > 0 || len(toRemove) > 0 {
+		// Simplify lifecycle: unmount all current mounts, then recreate the
+		// desired set from the plan. This avoids depending on per-path umount
+		// semantics and guarantees the final set matches Terraform config.
+		if err := r.client.Unmount(ctx, plan.Name.ValueString(), models.Mount{}); err != nil {
+			resp.Diagnostics.AddError("Failed to unmount existing mounts", err.Error())
+			return
+		}
+
+		for _, m := range plan.Mounts {
+			if err := r.client.Mount(ctx, plan.Name.ValueString(), mountConfigToModel(m)); err != nil {
+				resp.Diagnostics.AddError("Failed to mount directory", err.Error())
+				return
+			}
 		}
 	}
 
@@ -421,15 +434,26 @@ func (r *instanceResource) refreshState(ctx context.Context, name string, model 
 
 	model.ID = types.StringValue(name)
 	model.Name = types.StringValue(name)
+	diags.Append(applyInstanceToModel(ctx, instance, model)...)
+	return diags
+}
+
+func applyInstanceToModel(ctx context.Context, instance *models.Instance, model *instanceResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+
 	model.State = types.StringValue(instance.State)
 	model.Release = types.StringValue(instance.Release)
 	model.ImageRelease = types.StringValue(instance.ImageRelease)
 	model.SnapshotCount = types.Int64Value(int64(instance.SnapshotCount))
 	model.LastUpdated = types.StringValue(instance.LastUpdated.UTC().Format(time.RFC3339))
 
-	list, diag := types.ListValueFrom(ctx, types.StringType, instance.IPv4)
-	diags.Append(diag...)
-	model.IPv4 = list
+	if len(instance.IPv4) > 0 {
+		list, diag := types.ListValueFrom(ctx, types.StringType, instance.IPv4)
+		diags.Append(diag...)
+		model.IPv4 = list
+	} else {
+		model.IPv4 = types.ListNull(types.StringType)
+	}
 
 	return diags
 }
@@ -508,6 +532,53 @@ func expandMounts(configs []mountConfigModel) []models.Mount {
 			InstancePath: m.InstancePath.ValueString(),
 			ReadOnly:     m.ReadOnly.ValueBool(),
 		})
+	}
+	return result
+}
+
+func mountConfigToModel(m mountConfigModel) models.Mount {
+	return models.Mount{
+		HostPath:     m.HostPath.ValueString(),
+		InstancePath: m.InstancePath.ValueString(),
+		ReadOnly:     m.ReadOnly.ValueBool(),
+	}
+}
+
+func diffMounts(plan, state []mountConfigModel) (toAdd, toRemove []mountConfigModel) {
+	planMap := mountConfigMap(plan)
+	stateMap := mountConfigMap(state)
+
+	for key, current := range stateMap {
+		desired, exists := planMap[key]
+		if !exists {
+			toRemove = append(toRemove, current)
+			continue
+		}
+		if current.ReadOnly.ValueBool() != desired.ReadOnly.ValueBool() {
+			toRemove = append(toRemove, current)
+			toAdd = append(toAdd, desired)
+		}
+	}
+
+	for key, desired := range planMap {
+		if _, exists := stateMap[key]; !exists {
+			toAdd = append(toAdd, desired)
+		}
+	}
+
+	return
+}
+
+func mountConfigMap(configs []mountConfigModel) map[string]mountConfigModel {
+	result := make(map[string]mountConfigModel, len(configs))
+	for _, c := range configs {
+		host := c.HostPath.ValueString()
+		instance := c.InstancePath.ValueString()
+		if host == "" || instance == "" {
+			continue
+		}
+		key := host + "|" + instance
+		result[key] = c
 	}
 	return result
 }
