@@ -37,6 +37,8 @@ type Client interface {
 	ListSnapshots(ctx context.Context, instance string) ([]models.Snapshot, error)
 	CreateSnapshot(ctx context.Context, instance, name, comment string) (string, error)
 	DeleteSnapshot(ctx context.Context, instance, name string, purge bool) error
+	Mount(ctx context.Context, instance string, mount models.Mount) error
+	Unmount(ctx context.Context, instance string, mount models.Mount) error
 	Transfer(ctx context.Context, opts TransferOptions) error
 	TransferCapture(ctx context.Context, opts TransferOptions) ([]byte, error)
 }
@@ -462,6 +464,56 @@ func (c *client) DeleteSnapshot(ctx context.Context, instance, name string, purg
 	if _, err := c.run(ctx, args...); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (c *client) Mount(ctx context.Context, instance string, mount models.Mount) error {
+	if instance == "" {
+		return fmt.Errorf("instance name is required for mount")
+	}
+	if mount.HostPath == "" {
+		return fmt.Errorf("host path is required for mount")
+	}
+	if mount.InstancePath == "" {
+		return fmt.Errorf("instance path is required for mount")
+	}
+
+	target := fmt.Sprintf("%s:%s", instance, mount.InstancePath)
+	if mount.ReadOnly {
+		target = target + ":ro"
+	}
+
+	if _, err := c.run(ctx, "mount", mount.HostPath, target); err != nil {
+		return err
+	}
+
+	c.invalidateInstances()
+	return nil
+}
+
+func (c *client) Unmount(ctx context.Context, instance string, mount models.Mount) error {
+	if instance == "" {
+		return fmt.Errorf("instance name is required for umount")
+	}
+
+	var args []string
+	if mount.InstancePath == "" {
+		// No path -> unmount all mounts for this instance, per Multipass CLI docs.
+		args = []string{"umount", instance}
+	} else {
+		path := mount.InstancePath
+		if mount.ReadOnly {
+			path = path + ":ro"
+		}
+		target := fmt.Sprintf("%s:%s", instance, path)
+		args = []string{"umount", target}
+	}
+
+	if _, err := c.run(ctx, args...); err != nil {
+		return err
+	}
+
+	c.invalidateInstances()
 	return nil
 }
 
