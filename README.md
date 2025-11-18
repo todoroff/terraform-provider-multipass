@@ -1,3 +1,7 @@
+<p align="center">
+  <img width="600"  alt="terraform-provider-multipass-heading-image" src="https://github.com/user-attachments/assets/61f462de-90b1-4352-80a7-ab6bb140e175" />
+</p>
+
 # Terraform Multipass Provider
 
 [Terraform](https://www.terraform.io/) provider for [Canonical Multipass](https://canonical.com/multipass), implemented with the modern Terraform Plugin Framework. It exposes rich instance lifecycle management, alias automation, and data sources for images and networks while favoring performance and clear diagnostics.
