@@ -73,6 +73,7 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | `cloud_init`      | String  | No       | Inline cloud-init YAML applied at launch. Mutually exclusive with `cloud_init_file`. Forces recreation. |
 | `primary`         | Bool    | No       | If true, mark instance as Multipass primary. |
 | `auto_recover`    | Bool    | No       | Attempt to `multipass recover` if the instance is soft-deleted outside Terraform. |
+| `auto_start_on_recover` | Bool | No    | If true, automatically start the instance after a successful `auto_recover`. |
 | `networks`        | Block   | No       | Optional repeated block configuring host networks. Attributes: `name` (required), `mode`, `mac`. |
 | `mounts`          | Block   | No       | Optional repeated block configuring host mounts at launch. Attributes: `host_path`, `instance_path`, `read_only`. |
 
