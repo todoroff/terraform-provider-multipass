@@ -26,7 +26,7 @@ provider "multipass" {
 The following arguments are supported in the `provider "multipass"` block:
 
 - `multipass_path` – Optional. Explicit path to the `multipass` binary. Defaults to resolving `multipass` on `PATH`.
-- `command_timeout` – Optional. Timeout for CLI commands, in seconds. Default: `120`.
+- `command_timeout` – Optional. Timeout for CLI commands, in seconds. Default: `600`.
 - `default_image` – Optional. Default image alias/name used when `multipass_instance.image` is omitted.
 
 ## Resources

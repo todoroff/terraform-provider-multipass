@@ -72,7 +72,7 @@ resource "multipass_alias" "shell" {
 | Attribute        | Type   | Description                                                                 |
 | ---------------- | ------ | --------------------------------------------------------------------------- |
 | `multipass_path` | String | Optional explicit path to the `multipass` binary. Defaults to PATH lookup. |
-| `command_timeout`| Int    | Timeout in seconds for CLI calls (default 120).                             |
+| `command_timeout`| Int    | Timeout in seconds for CLI calls (default 600).                             |
 | `default_image`  | String | Fallback image alias/name when resources omit `image`.                      |
 
 ## Resources
