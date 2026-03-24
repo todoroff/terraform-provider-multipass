@@ -70,7 +70,7 @@ type TransferOptions struct {
 }
 
 const (
-	defaultTimeout  = 2 * time.Minute
+	defaultTimeout  = 10 * time.Minute
 	cacheTTL        = 3 * time.Second
 	jsonFormatFlag  = "--format"
 	jsonFormatValue = "json"
@@ -213,6 +213,9 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 		}
 		args = append(args, "--mount", spec)
 	}
+
+	// Pass --timeout to align the Multipass CLI's own timeout with command_timeout.
+	args = append(args, "--timeout", fmt.Sprintf("%d", int(c.timeout.Seconds())))
 
 	if _, err := c.run(ctx, args...); err != nil {
 		return err
@@ -590,7 +593,7 @@ func (c *client) run(ctx context.Context, args ...string) ([]byte, error) {
 	}
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("multipass command timed out: %s", strings.Join(args, " "))
+		return nil, fmt.Errorf("%w: %s", ErrTimeout, strings.Join(args, " "))
 	}
 
 	stdoutStr := strings.TrimSpace(stdout.String())
@@ -598,6 +601,11 @@ func (c *client) run(ctx context.Context, args ...string) ([]byte, error) {
 
 	if strings.Contains(stderrStr, "does not exist") || strings.Contains(stderrStr, "not found") {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, stderrStr)
+	}
+
+	// Detect Multipass CLI's own --timeout errors
+	if isTimeoutError(stderrStr) {
+		return nil, fmt.Errorf("%w: %s", ErrTimeout, stderrStr)
 	}
 
 	return nil, &CLIError{

@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultBinaryName = "multipass"
-	defaultTimeoutSec = 120
+	defaultTimeoutSec = 600
 )
 
 // New returns a function that instantiates a Multipass provider configured with

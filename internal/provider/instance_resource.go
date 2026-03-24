@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -246,8 +248,35 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	if err := r.client.LaunchInstance(ctx, opts); err != nil {
-		resp.Diagnostics.AddError("Failed to launch instance", err.Error())
-		return
+		if !errors.Is(err, multipasscli.ErrTimeout) {
+			resp.Diagnostics.AddError("Failed to launch instance", err.Error())
+			return
+		}
+
+		// Launch timed out. The Multipass daemon may still be creating the
+		// instance in the background. Poll to see if it becomes available.
+		tflog.Warn(ctx, "Launch command timed out, checking if instance was created by daemon", map[string]any{
+			"name": opts.Name,
+		})
+
+		recoveryTimeout := 5 * time.Minute
+		if recoverErr := r.waitForInstanceAfterTimeout(ctx, opts.Name, recoveryTimeout); recoverErr != nil {
+			resp.Diagnostics.AddError(
+				"Launch timed out and instance not found",
+				fmt.Sprintf(
+					"The launch command timed out and the instance %q could not be found after waiting an additional %s. "+
+						"Consider increasing the provider command_timeout or check 'multipass list' to see if the instance is still being created. "+
+						"Original error: %s",
+					opts.Name, recoveryTimeout, err.Error(),
+				),
+			)
+			return
+		}
+
+		resp.Diagnostics.AddWarning(
+			"Launch timed out but instance was created",
+			fmt.Sprintf("The launch command timed out, but instance %q was successfully created by the Multipass daemon.", opts.Name),
+		)
 	}
 
 	if opts.Primary {
@@ -606,4 +635,32 @@ func valueOrDefaultInt(v types.Int64, def int) int {
 		return def
 	}
 	return int(v.ValueInt64())
+}
+
+// waitForInstanceAfterTimeout polls for an instance to appear after a launch
+// timeout. Tolerates ErrNotFound because the instance may not yet be visible
+// while the daemon is still creating it.
+func (r *instanceResource) waitForInstanceAfterTimeout(ctx context.Context, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 5 * time.Second
+
+	for time.Now().Before(deadline) {
+		instance, err := r.client.GetInstance(ctx, name)
+		if err == nil {
+			state := strings.ToLower(instance.State)
+			if state == "running" || state == "stopped" || state == "suspended" {
+				return nil
+			}
+			// Instance exists but in transitional state (e.g., Starting), keep polling
+		}
+		// Instance not found yet or transient error — keep polling
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+
+	return fmt.Errorf("instance %q did not become available within %s after launch timeout", name, timeout)
 }
