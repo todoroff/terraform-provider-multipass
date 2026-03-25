@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -15,6 +17,8 @@ import (
 
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
+
+const defaultSnapshotTimeout = 5 * time.Minute
 
 var (
 	_ resource.Resource                = (*snapshotResource)(nil)
@@ -32,17 +36,18 @@ type snapshotResource struct {
 }
 
 type snapshotResourceModel struct {
-	ID       types.String `tfsdk:"id"`
-	Instance types.String `tfsdk:"instance"`
-	Name     types.String `tfsdk:"name"`
-	Comment  types.String `tfsdk:"comment"`
+	ID       types.String   `tfsdk:"id"`
+	Instance types.String   `tfsdk:"instance"`
+	Name     types.String   `tfsdk:"name"`
+	Comment  types.String   `tfsdk:"comment"`
+	Timeouts timeouts.Value `tfsdk:"timeouts"`
 }
 
 func (r *snapshotResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_snapshot"
 }
 
-func (r *snapshotResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *snapshotResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a named snapshot for a Multipass instance.",
 		Attributes: map[string]schema.Attribute{
@@ -76,6 +81,12 @@ func (r *snapshotResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+				Delete: true,
+			}),
+		},
 	}
 }
 
@@ -98,6 +109,14 @@ func (r *snapshotResource) Create(ctx context.Context, req resource.CreateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	createTimeout, diags := plan.Timeouts.Create(ctx, defaultSnapshotTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, createTimeout)
+	defer cancel()
 
 	instance := plan.Instance.ValueString()
 	name := ""
@@ -196,6 +215,14 @@ func (r *snapshotResource) Delete(ctx context.Context, req resource.DeleteReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	deleteTimeout, diags := state.Timeouts.Delete(ctx, defaultSnapshotTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
+	defer cancel()
 
 	instance := state.Instance.ValueString()
 	name := state.Name.ValueString()

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -46,7 +47,7 @@ func (r *instanceResource) Metadata(_ context.Context, req resource.MetadataRequ
 	resp.TypeName = req.ProviderTypeName + "_instance"
 }
 
-func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages Canonical Multipass instances.",
 		Attributes: map[string]schema.Attribute{
@@ -199,6 +200,12 @@ func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					},
 				},
 			},
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+				Read:   true,
+				Update: true,
+				Delete: true,
+			}),
 		},
 	}
 }
@@ -224,6 +231,14 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	createTimeout, diags := plan.Timeouts.Create(ctx, defaultInstanceTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, createTimeout)
+	defer cancel()
 
 	if hasStringValue(plan.CloudInitFile) && hasStringValue(plan.CloudInit) {
 		resp.Diagnostics.AddAttributeError(
@@ -285,8 +300,8 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		}
 	}
 
-	diags := r.refreshState(ctx, opts.Name, &plan)
-	resp.Diagnostics.Append(diags...)
+	refreshDiags := r.refreshState(ctx, opts.Name, &plan)
+	resp.Diagnostics.Append(refreshDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -304,6 +319,14 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	readTimeout, diags := state.Timeouts.Read(ctx, defaultInstanceTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, readTimeout)
+	defer cancel()
 
 	name := state.Name.ValueString()
 	instance, err := r.client.GetInstance(ctx, name)
@@ -395,6 +418,14 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	updateTimeout, diags := plan.Timeouts.Update(ctx, defaultInstanceTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
+
 	if hasStringValue(plan.CloudInitFile) && hasStringValue(plan.CloudInit) {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cloud_init"),
@@ -429,8 +460,8 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 
-	diags := r.refreshState(ctx, plan.Name.ValueString(), &plan)
-	resp.Diagnostics.Append(diags...)
+	refreshDiags := r.refreshState(ctx, plan.Name.ValueString(), &plan)
+	resp.Diagnostics.Append(refreshDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -448,6 +479,14 @@ func (r *instanceResource) Delete(ctx context.Context, req resource.DeleteReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	deleteTimeout, diags := state.Timeouts.Delete(ctx, defaultInstanceTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
+	defer cancel()
 
 	name := state.Name.ValueString()
 	if err := r.client.DeleteInstance(ctx, name, true); err != nil {
@@ -540,6 +579,8 @@ type mountConfigModel struct {
 	ReadOnly     types.Bool   `tfsdk:"read_only"`
 }
 
+const defaultInstanceTimeout = 10 * time.Minute
+
 type instanceResourceModel struct {
 	ID                 types.String         `tfsdk:"id"`
 	Name               types.String         `tfsdk:"name"`
@@ -554,6 +595,7 @@ type instanceResourceModel struct {
 	AutoStartOnRecover types.Bool           `tfsdk:"auto_start_on_recover"`
 	Networks           []networkConfigModel `tfsdk:"networks"`
 	Mounts             []mountConfigModel   `tfsdk:"mounts"`
+	Timeouts           timeouts.Value       `tfsdk:"timeouts"`
 	IPv4               types.List           `tfsdk:"ipv4"`
 	State              types.String         `tfsdk:"state"`
 	Release            types.String         `tfsdk:"release"`
