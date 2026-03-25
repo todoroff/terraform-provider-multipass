@@ -37,10 +37,9 @@ func NewFileUploadResource() resource.Resource {
 }
 
 type fileUploadResource struct {
-	client multipasscli.Client
+	client         multipasscli.Client
+	commandTimeout time.Duration
 }
-
-const defaultFileTimeout = 5 * time.Minute
 
 type fileUploadResourceModel struct {
 	ID            types.String   `tfsdk:"id"`
@@ -147,6 +146,7 @@ func (r *fileUploadResource) Configure(_ context.Context, req resource.Configure
 
 	data := req.ProviderData.(providerData)
 	r.client = data.client
+	r.commandTimeout = data.commandTimeout
 }
 
 func (r *fileUploadResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
@@ -201,7 +201,7 @@ func (r *fileUploadResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	createTimeout, diags := plan.Timeouts.Create(ctx, defaultFileTimeout)
+	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -282,7 +282,7 @@ func (r *fileUploadResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	updateTimeout, diags := plan.Timeouts.Update(ctx, defaultFileTimeout)
+	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

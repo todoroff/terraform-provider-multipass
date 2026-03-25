@@ -40,8 +40,9 @@ func NewFileDownloadResource() resource.Resource {
 }
 
 type fileDownloadResource struct {
-	client multipasscli.Client
-	hostOS string
+	client         multipasscli.Client
+	hostOS         string
+	commandTimeout time.Duration
 }
 
 type fileDownloadResourceModel struct {
@@ -153,6 +154,7 @@ func (r *fileDownloadResource) Configure(_ context.Context, req resource.Configu
 	data := req.ProviderData.(providerData)
 	r.client = data.client
 	r.hostOS = data.hostOS
+	r.commandTimeout = data.commandTimeout
 }
 
 func (r *fileDownloadResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
@@ -185,7 +187,7 @@ func (r *fileDownloadResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	createTimeout, diags := plan.Timeouts.Create(ctx, defaultFileTimeout)
+	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -245,7 +247,7 @@ func (r *fileDownloadResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	updateTimeout, diags := plan.Timeouts.Update(ctx, defaultFileTimeout)
+	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

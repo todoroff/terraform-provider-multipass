@@ -39,8 +39,9 @@ func NewInstanceResource() resource.Resource {
 }
 
 type instanceResource struct {
-	client       multipasscli.Client
-	defaultImage string
+	client         multipasscli.Client
+	defaultImage   string
+	commandTimeout time.Duration
 }
 
 func (r *instanceResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -218,6 +219,7 @@ func (r *instanceResource) Configure(_ context.Context, req resource.ConfigureRe
 	data := req.ProviderData.(providerData)
 	r.client = data.client
 	r.defaultImage = data.defaultImage
+	r.commandTimeout = data.commandTimeout
 }
 
 func (r *instanceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -232,7 +234,7 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	createTimeout, diags := plan.Timeouts.Create(ctx, defaultInstanceTimeout)
+	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -323,7 +325,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	readTimeout, diags := state.Timeouts.Read(ctx, defaultInstanceTimeout)
+	readTimeout, diags := state.Timeouts.Read(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -421,7 +423,7 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	updateTimeout, diags := plan.Timeouts.Update(ctx, defaultInstanceTimeout)
+	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -483,7 +485,7 @@ func (r *instanceResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	deleteTimeout, diags := state.Timeouts.Delete(ctx, defaultInstanceTimeout)
+	deleteTimeout, diags := state.Timeouts.Delete(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -581,8 +583,6 @@ type mountConfigModel struct {
 	InstancePath types.String `tfsdk:"instance_path"`
 	ReadOnly     types.Bool   `tfsdk:"read_only"`
 }
-
-const defaultInstanceTimeout = 10 * time.Minute
 
 type instanceResourceModel struct {
 	ID                 types.String         `tfsdk:"id"`

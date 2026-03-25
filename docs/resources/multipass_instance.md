@@ -80,7 +80,7 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | `auto_start_on_recover` | Bool | No    | If true, automatically start the instance after a successful `auto_recover`. |
 | `networks`        | Block   | No       | Optional repeated block configuring host networks. Attributes: `name` (required), `mode`, `mac`. |
 | `mounts`          | Block   | No       | Optional repeated block configuring host mounts. Attributes: `host_path`, `instance_path`, `read_only`. |
-| `timeouts`        | Block   | No       | Per-operation timeouts (`create`, `read`, `update`, `delete`). Accepts duration strings like `"20m"` or `"1h"`. Defaults to 10 minutes. |
+| `timeouts`        | Block   | No       | Per-operation timeouts (`create`, `read`, `update`, `delete`). Accepts duration strings like `"20m"` or `"1h"`. Falls back to the provider `command_timeout` when not set. |
 
 ## Attributes Reference
 

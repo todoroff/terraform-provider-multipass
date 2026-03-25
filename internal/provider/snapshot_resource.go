@@ -18,8 +18,6 @@ import (
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
-const defaultSnapshotTimeout = 5 * time.Minute
-
 var (
 	_ resource.Resource                = (*snapshotResource)(nil)
 	_ resource.ResourceWithConfigure   = (*snapshotResource)(nil)
@@ -32,7 +30,8 @@ func NewSnapshotResource() resource.Resource {
 }
 
 type snapshotResource struct {
-	client multipasscli.Client
+	client         multipasscli.Client
+	commandTimeout time.Duration
 }
 
 type snapshotResourceModel struct {
@@ -96,6 +95,7 @@ func (r *snapshotResource) Configure(_ context.Context, req resource.ConfigureRe
 	}
 	data := req.ProviderData.(providerData)
 	r.client = data.client
+	r.commandTimeout = data.commandTimeout
 }
 
 func (r *snapshotResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -110,7 +110,7 @@ func (r *snapshotResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	createTimeout, diags := plan.Timeouts.Create(ctx, defaultSnapshotTimeout)
+	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -216,7 +216,7 @@ func (r *snapshotResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	deleteTimeout, diags := state.Timeouts.Delete(ctx, defaultSnapshotTimeout)
+	deleteTimeout, diags := state.Timeouts.Delete(ctx, r.commandTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
