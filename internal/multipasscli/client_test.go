@@ -36,3 +36,12 @@ func TestAliasCommand_dirWithSpaces(t *testing.T) {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
 }
+
+func TestAliasCommand_commandWithSingleQuotes(t *testing.T) {
+	t.Parallel()
+	got := aliasCommand("grep 'foo' bar.txt", "/workspace")
+	want := `bash -c 'cd "/workspace" && exec grep '\''foo'\'' bar.txt'`
+	if got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
