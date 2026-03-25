@@ -274,8 +274,11 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 			"name": opts.Name,
 		})
 
+		// Use a fresh context for recovery since the create deadline has expired.
 		recoveryTimeout := 5 * time.Minute
-		if recoverErr := r.waitForInstanceAfterTimeout(ctx, opts.Name, recoveryTimeout); recoverErr != nil {
+		recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), recoveryTimeout)
+		defer recoveryCancel()
+		if recoverErr := r.waitForInstanceAfterTimeout(recoveryCtx, opts.Name, recoveryTimeout); recoverErr != nil {
 			resp.Diagnostics.AddError(
 				"Launch timed out and instance not found",
 				fmt.Sprintf(
