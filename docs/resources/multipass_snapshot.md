@@ -21,6 +21,7 @@ resource "multipass_snapshot" "db_snapshot" {
 | `instance` | String | Yes      | Name of the Multipass instance to snapshot. The instance must be stopped. |
 | `name`     | String | No       | Snapshot name. If omitted, Multipass will auto-generate one (for example, `snapshot1`). Changing forces recreation. |
 | `comment`  | String | No       | Optional snapshot comment. Changing forces recreation. |
+| `timeouts` | Block  | No       | Per-operation timeouts (`create`, `delete`). Accepts duration strings like `"5m"` or `"1h"`. Falls back to the provider `command_timeout` when not set. |
 
 ## Attributes Reference
 
