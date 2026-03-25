@@ -9,7 +9,6 @@ terraform {
   required_providers {
     multipass = {
       source  = "todoroff/multipass"
-      version = ">= 1.0.0"
     }
   }
 }
@@ -42,5 +41,3 @@ The following arguments are supported in the `provider "multipass"` block:
 - `multipass_images` – Enumerate launchable images/blueprints.
 - `multipass_networks` – List host bridge targets.
 - `multipass_instance` – Inspect existing Multipass instances.
-
-
