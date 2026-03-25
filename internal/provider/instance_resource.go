@@ -637,21 +637,26 @@ func valueOrDefaultInt(v types.Int64, def int) int {
 	return int(v.ValueInt64())
 }
 
-// waitForInstanceAfterTimeout polls for an instance to appear after a launch
-// timeout. Tolerates ErrNotFound because the instance may not yet be visible
-// while the daemon is still creating it.
+// waitForInstanceAfterTimeout polls for an instance after a launch timeout.
+// Uses ListInstances (multipass list) which only queries the daemon and does
+// not require SSH — important because multipass info relies on SSH which may
+// be unavailable on a still-booting instance or one with custom cloud-init.
 func (r *instanceResource) waitForInstanceAfterTimeout(ctx context.Context, name string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	pollInterval := 5 * time.Second
 
 	for time.Now().Before(deadline) {
-		instance, err := r.client.GetInstance(ctx, name)
+		instances, err := r.client.ListInstances(ctx, true)
 		if err == nil {
-			state := strings.ToLower(instance.State)
-			if state == "running" || state == "stopped" || state == "suspended" {
-				return nil
+			for _, inst := range instances {
+				if inst.Name == name {
+					state := strings.ToLower(inst.State)
+					if state == "running" || state == "stopped" || state == "suspended" {
+						return nil
+					}
+					// Instance exists but in transitional state, keep polling
+				}
 			}
-			// Instance exists but in transitional state (e.g., Starting), keep polling
 		}
 		// Instance not found yet or transient error — keep polling
 
