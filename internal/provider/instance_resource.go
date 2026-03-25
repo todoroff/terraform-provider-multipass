@@ -308,7 +308,7 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 
 	if plan.WaitForCloudInit.ValueBool() {
 		tflog.Info(ctx, "Waiting for cloud-init to finish", map[string]any{"name": opts.Name})
-		if err := r.waitForCloudInit(ctx, opts.Name); err != nil {
+		if err := r.waitForCloudInit(createCtx, opts.Name); err != nil {
 			resp.Diagnostics.AddWarning("cloud-init wait failed", err.Error())
 		}
 	}
@@ -771,7 +771,8 @@ func (r *instanceResource) waitForInstanceAfterTimeout(ctx context.Context, name
 // which blocks until cloud-init reaches a terminal state (done/error/disabled).
 func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) error {
 	if err := r.client.Exec(ctx, name, []string{"cloud-init", "status", "--wait"}); err != nil {
-		return fmt.Errorf("cloud-init did not finish successfully on instance %q: %w", name, err)
+		return fmt.Errorf("cloud-init did not finish successfully on instance %q: %w. "+
+			"Check logs with: multipass exec %s -- cat /var/log/cloud-init-output.log", name, err, name)
 	}
 	return nil
 }
