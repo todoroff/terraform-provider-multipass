@@ -239,8 +239,6 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, createTimeout)
-	defer cancel()
 
 	if hasStringValue(plan.CloudInitFile) && hasStringValue(plan.CloudInit) {
 		resp.Diagnostics.AddAttributeError(
@@ -264,7 +262,12 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		Primary:         plan.Primary.ValueBool(),
 	}
 
-	if err := r.client.LaunchInstance(ctx, opts); err != nil {
+	// Use a dedicated context for the launch so the original ctx stays
+	// alive for recovery, SetPrimary, and refreshState after a timeout.
+	createCtx, createCancel := context.WithTimeout(ctx, createTimeout)
+	defer createCancel()
+
+	if err := r.client.LaunchInstance(createCtx, opts); err != nil {
 		if !errors.Is(err, multipasscli.ErrTimeout) {
 			resp.Diagnostics.AddError("Failed to launch instance", err.Error())
 			return
@@ -276,9 +279,8 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 			"name": opts.Name,
 		})
 
-		// Use a fresh context for recovery since the create deadline has expired.
 		recoveryTimeout := 5 * time.Minute
-		recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), recoveryTimeout)
+		recoveryCtx, recoveryCancel := context.WithTimeout(ctx, recoveryTimeout)
 		defer recoveryCancel()
 		if recoverErr := r.waitForInstanceAfterTimeout(recoveryCtx, opts.Name, recoveryTimeout); recoverErr != nil {
 			resp.Diagnostics.AddError(
