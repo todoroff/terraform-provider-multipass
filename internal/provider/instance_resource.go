@@ -457,14 +457,42 @@ func (r *instanceResource) refreshState(ctx context.Context, name string, model 
 	var diags diag.Diagnostics
 	instance, err := r.client.GetInstance(ctx, name)
 	if err != nil {
-		diags.AddError("Failed to refresh instance state", err.Error())
-		return diags
+		// multipass info failed (requires SSH). Fall back to multipass list
+		// which only queries the daemon. This populates core attributes
+		// (name, state, ipv4, release) while info-only fields (load,
+		// cpu_count, memory_bytes, etc.) remain empty until the next refresh.
+		tflog.Warn(ctx, "multipass info failed, falling back to list", map[string]any{"name": name, "error": err.Error()})
+		instance, err = r.getInstanceFromList(ctx, name)
+		if err != nil {
+			diags.AddError("Failed to refresh instance state", err.Error())
+			return diags
+		}
+		diags.AddWarning(
+			"Instance state partially refreshed",
+			fmt.Sprintf("Could not query instance %q via 'multipass info' (SSH may not be ready). "+
+				"Core attributes (name, state, ipv4) are populated from 'multipass list'. "+
+				"Run 'tofu refresh' later to populate remaining attributes.", name),
+		)
 	}
 
 	model.ID = types.StringValue(name)
 	model.Name = types.StringValue(name)
 	diags.Append(applyInstanceToModel(ctx, instance, model)...)
 	return diags
+}
+
+// getInstanceFromList finds an instance by name using ListInstances (no SSH).
+func (r *instanceResource) getInstanceFromList(ctx context.Context, name string) (*models.Instance, error) {
+	instances, err := r.client.ListInstances(ctx, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list instances: %w", err)
+	}
+	for i := range instances {
+		if instances[i].Name == name {
+			return &instances[i], nil
+		}
+	}
+	return nil, fmt.Errorf("instance %q not found in list", name)
 }
 
 func applyInstanceToModel(ctx context.Context, instance *models.Instance, model *instanceResourceModel) diag.Diagnostics {
