@@ -48,5 +48,3 @@ output "instance_ips" {
   description = "Static IP configured inside the guest"
   value       = multipass_instance.static.ipv4
 }
-
-

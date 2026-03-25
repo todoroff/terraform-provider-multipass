@@ -1,10 +1,8 @@
 terraform {
-  required_version = ">= 1.6.0"
 
   required_providers {
     multipass = {
       source  = "todoroff/multipass"
-      version = ">= 1.2.0"
     }
   }
 }
@@ -37,5 +35,3 @@ data "multipass_snapshots" "test" {
 output "snapshot_names" {
   value = [for s in data.multipass_snapshots.test.snapshots : s.name]
 }
-
-
