@@ -9,6 +9,7 @@ import (
 	"time"
 
 	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -38,15 +39,16 @@ func NewInstanceResource() resource.Resource {
 }
 
 type instanceResource struct {
-	client       multipasscli.Client
-	defaultImage string
+	client         multipasscli.Client
+	defaultImage   string
+	commandTimeout time.Duration
 }
 
 func (r *instanceResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_instance"
 }
 
-func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages Canonical Multipass instances.",
 		Attributes: map[string]schema.Attribute{
@@ -199,6 +201,12 @@ func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					},
 				},
 			},
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+				Read:   true,
+				Update: true,
+				Delete: true,
+			}),
 		},
 	}
 }
@@ -211,6 +219,7 @@ func (r *instanceResource) Configure(_ context.Context, req resource.ConfigureRe
 	data := req.ProviderData.(providerData)
 	r.client = data.client
 	r.defaultImage = data.defaultImage
+	r.commandTimeout = data.commandTimeout
 }
 
 func (r *instanceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -221,6 +230,12 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 
 	var plan instanceResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -247,7 +262,12 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		Primary:         plan.Primary.ValueBool(),
 	}
 
-	if err := r.client.LaunchInstance(ctx, opts); err != nil {
+	// Use a dedicated context for the launch so the original ctx stays
+	// alive for recovery, SetPrimary, and refreshState after a timeout.
+	createCtx, createCancel := context.WithTimeout(ctx, createTimeout)
+	defer createCancel()
+
+	if err := r.client.LaunchInstance(createCtx, opts); err != nil {
 		if !errors.Is(err, multipasscli.ErrTimeout) {
 			resp.Diagnostics.AddError("Failed to launch instance", err.Error())
 			return
@@ -260,7 +280,9 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		})
 
 		recoveryTimeout := 5 * time.Minute
-		if recoverErr := r.waitForInstanceAfterTimeout(ctx, opts.Name, recoveryTimeout); recoverErr != nil {
+		recoveryCtx, recoveryCancel := context.WithTimeout(ctx, recoveryTimeout)
+		defer recoveryCancel()
+		if recoverErr := r.waitForInstanceAfterTimeout(recoveryCtx, opts.Name, recoveryTimeout); recoverErr != nil {
 			resp.Diagnostics.AddError(
 				"Launch timed out and instance not found",
 				fmt.Sprintf(
@@ -285,8 +307,8 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		}
 	}
 
-	diags := r.refreshState(ctx, opts.Name, &plan)
-	resp.Diagnostics.Append(diags...)
+	refreshDiags := r.refreshState(ctx, opts.Name, &plan)
+	resp.Diagnostics.Append(refreshDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -304,6 +326,14 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	readTimeout, diags := state.Timeouts.Read(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, readTimeout)
+	defer cancel()
 
 	name := state.Name.ValueString()
 	instance, err := r.client.GetInstance(ctx, name)
@@ -395,6 +425,14 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
+
 	if hasStringValue(plan.CloudInitFile) && hasStringValue(plan.CloudInit) {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cloud_init"),
@@ -429,8 +467,8 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 
-	diags := r.refreshState(ctx, plan.Name.ValueString(), &plan)
-	resp.Diagnostics.Append(diags...)
+	refreshDiags := r.refreshState(ctx, plan.Name.ValueString(), &plan)
+	resp.Diagnostics.Append(refreshDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -448,6 +486,14 @@ func (r *instanceResource) Delete(ctx context.Context, req resource.DeleteReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	deleteTimeout, diags := state.Timeouts.Delete(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
+	defer cancel()
 
 	name := state.Name.ValueString()
 	if err := r.client.DeleteInstance(ctx, name, true); err != nil {
@@ -554,6 +600,7 @@ type instanceResourceModel struct {
 	AutoStartOnRecover types.Bool           `tfsdk:"auto_start_on_recover"`
 	Networks           []networkConfigModel `tfsdk:"networks"`
 	Mounts             []mountConfigModel   `tfsdk:"mounts"`
+	Timeouts           timeouts.Value       `tfsdk:"timeouts"`
 	IPv4               types.List           `tfsdk:"ipv4"`
 	State              types.String         `tfsdk:"state"`
 	Release            types.String         `tfsdk:"release"`

@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"time"
+
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
@@ -19,7 +21,8 @@ type providerConfig struct {
 }
 
 type providerData struct {
-	client       multipasscli.Client
-	defaultImage string
-	hostOS       string
+	client         multipasscli.Client
+	defaultImage   string
+	hostOS         string
+	commandTimeout time.Duration
 }

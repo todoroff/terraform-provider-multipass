@@ -39,6 +39,7 @@ resource "multipass_file_download" "logs" {
 * `create_parents` – (Optional) Create missing parent directories for `destination`. Defaults to `true`.
 * `overwrite` – (Optional) Whether to overwrite existing files/directories. Defaults to `true`.
 * `triggers` – (Optional) Map of arbitrary values that, when changed, force the resource to re-download. This mirrors `null_resource.triggers` and is useful to tie downloads to other resource changes.
+* `timeouts` – (Optional) Per-operation timeouts (`create`, `update`). Accepts duration strings like `"5m"` or `"1h"`. Falls back to the provider `command_timeout` when not set.
 
 ## Attribute Reference
 

@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"time"
+
 	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -34,25 +37,27 @@ func NewFileUploadResource() resource.Resource {
 }
 
 type fileUploadResource struct {
-	client multipasscli.Client
+	client         multipasscli.Client
+	commandTimeout time.Duration
 }
 
 type fileUploadResourceModel struct {
-	ID            types.String `tfsdk:"id"`
-	Instance      types.String `tfsdk:"instance"`
-	Destination   types.String `tfsdk:"destination"`
-	Source        types.String `tfsdk:"source"`
-	Content       types.String `tfsdk:"content"`
-	Recursive     types.Bool   `tfsdk:"recursive"`
-	CreateParents types.Bool   `tfsdk:"create_parents"`
-	ContentHash   types.String `tfsdk:"content_hash"`
+	ID            types.String   `tfsdk:"id"`
+	Instance      types.String   `tfsdk:"instance"`
+	Destination   types.String   `tfsdk:"destination"`
+	Source        types.String   `tfsdk:"source"`
+	Content       types.String   `tfsdk:"content"`
+	Recursive     types.Bool     `tfsdk:"recursive"`
+	CreateParents types.Bool     `tfsdk:"create_parents"`
+	ContentHash   types.String   `tfsdk:"content_hash"`
+	Timeouts      timeouts.Value `tfsdk:"timeouts"`
 }
 
 func (r *fileUploadResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_file_upload"
 }
 
-func (r *fileUploadResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *fileUploadResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	oneOf := []path.Expression{
 		path.MatchRelative().AtParent().AtName("source"),
 		path.MatchRelative().AtParent().AtName("content"),
@@ -125,6 +130,12 @@ func (r *fileUploadResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+				Update: true,
+			}),
+		},
 	}
 }
 
@@ -135,6 +146,7 @@ func (r *fileUploadResource) Configure(_ context.Context, req resource.Configure
 
 	data := req.ProviderData.(providerData)
 	r.client = data.client
+	r.commandTimeout = data.commandTimeout
 }
 
 func (r *fileUploadResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
@@ -188,6 +200,14 @@ func (r *fileUploadResource) Create(ctx context.Context, req resource.CreateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, createTimeout)
+	defer cancel()
 
 	hashValue, diags := r.computeHash(&plan)
 	resp.Diagnostics.Append(diags...)
@@ -261,6 +281,14 @@ func (r *fileUploadResource) Update(ctx context.Context, req resource.UpdateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
 
 	hashValue, diags := r.computeHash(&plan)
 	resp.Diagnostics.Append(diags...)

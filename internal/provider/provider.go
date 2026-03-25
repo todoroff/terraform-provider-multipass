@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -138,9 +139,10 @@ func (p *MultipassProvider) Configure(ctx context.Context, req provider.Configur
 	p.mu.Unlock()
 
 	resp.ResourceData = providerData{
-		client:       client,
-		defaultImage: cfg.DefaultImage,
-		hostOS:       p.hostOS,
+		client:         client,
+		defaultImage:   cfg.DefaultImage,
+		hostOS:         p.hostOS,
+		commandTimeout: time.Duration(cfg.CommandTimeout) * time.Second,
 	}
 	resp.DataSourceData = resp.ResourceData
 }

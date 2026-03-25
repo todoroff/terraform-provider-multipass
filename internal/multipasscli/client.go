@@ -219,10 +219,15 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 		args = append(args, "--mount", spec)
 	}
 
-	// Pass --timeout to align the Multipass CLI's own timeout with command_timeout.
-	// When it expires, Multipass stops waiting but background operations (VM creation)
-	// continue — the recovery logic in Create() will pick up the instance.
-	args = append(args, "--timeout", fmt.Sprintf("%d", int(c.timeout.Seconds())))
+	// Align the Multipass CLI's own --timeout with the context deadline (which
+	// may come from a per-resource timeout) or fall back to the client default.
+	cliTimeout := c.timeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			cliTimeout = remaining
+		}
+	}
+	args = append(args, "--timeout", fmt.Sprintf("%d", int(cliTimeout.Seconds())))
 
 	if _, err := c.run(ctx, args...); err != nil {
 		return err
@@ -587,8 +592,14 @@ func (c *client) runJSON(ctx context.Context, dest any, args ...string) error {
 }
 
 func (c *client) run(ctx context.Context, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
+	// Respect per-operation deadlines set by the caller (e.g. per-resource
+	// timeouts). Only apply the client-level default when the context does
+	// not already carry a deadline.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
 
 	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
 	var stdout, stderr bytes.Buffer

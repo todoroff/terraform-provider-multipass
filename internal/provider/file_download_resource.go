@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	frameworkpath "github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -39,27 +40,29 @@ func NewFileDownloadResource() resource.Resource {
 }
 
 type fileDownloadResource struct {
-	client multipasscli.Client
-	hostOS string
+	client         multipasscli.Client
+	hostOS         string
+	commandTimeout time.Duration
 }
 
 type fileDownloadResourceModel struct {
-	ID            types.String `tfsdk:"id"`
-	Instance      types.String `tfsdk:"instance"`
-	Source        types.String `tfsdk:"source"`
-	Destination   types.String `tfsdk:"destination"`
-	Recursive     types.Bool   `tfsdk:"recursive"`
-	CreateParents types.Bool   `tfsdk:"create_parents"`
-	Overwrite     types.Bool   `tfsdk:"overwrite"`
-	Triggers      types.Map    `tfsdk:"triggers"`
-	ContentHash   types.String `tfsdk:"content_hash"`
+	ID            types.String   `tfsdk:"id"`
+	Instance      types.String   `tfsdk:"instance"`
+	Source        types.String   `tfsdk:"source"`
+	Destination   types.String   `tfsdk:"destination"`
+	Recursive     types.Bool     `tfsdk:"recursive"`
+	CreateParents types.Bool     `tfsdk:"create_parents"`
+	Overwrite     types.Bool     `tfsdk:"overwrite"`
+	Triggers      types.Map      `tfsdk:"triggers"`
+	ContentHash   types.String   `tfsdk:"content_hash"`
+	Timeouts      timeouts.Value `tfsdk:"timeouts"`
 }
 
 func (r *fileDownloadResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_file_download"
 }
 
-func (r *fileDownloadResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *fileDownloadResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Downloads files or directories from Multipass instances to the host using `multipass transfer`.",
 		Attributes: map[string]schema.Attribute{
@@ -134,6 +137,12 @@ func (r *fileDownloadResource) Schema(_ context.Context, _ resource.SchemaReques
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+				Update: true,
+			}),
+		},
 	}
 }
 
@@ -145,6 +154,7 @@ func (r *fileDownloadResource) Configure(_ context.Context, req resource.Configu
 	data := req.ProviderData.(providerData)
 	r.client = data.client
 	r.hostOS = data.hostOS
+	r.commandTimeout = data.commandTimeout
 }
 
 func (r *fileDownloadResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
@@ -177,8 +187,16 @@ func (r *fileDownloadResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	if diags := r.downloadAndWrite(ctx, &plan); diags.HasError() {
-		resp.Diagnostics.Append(diags...)
+	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, createTimeout)
+	defer cancel()
+
+	if downloadDiags := r.downloadAndWrite(ctx, &plan); downloadDiags.HasError() {
+		resp.Diagnostics.Append(downloadDiags...)
 		return
 	}
 
@@ -229,8 +247,16 @@ func (r *fileDownloadResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	if diags := r.downloadAndWrite(ctx, &plan); diags.HasError() {
-		resp.Diagnostics.Append(diags...)
+	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
+
+	if downloadDiags := r.downloadAndWrite(ctx, &plan); downloadDiags.HasError() {
+		resp.Diagnostics.Append(downloadDiags...)
 		return
 	}
 

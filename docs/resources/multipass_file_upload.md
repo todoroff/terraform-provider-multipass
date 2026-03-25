@@ -48,6 +48,8 @@ resource "multipass_file_upload" "app_bundle" {
 
 Exactly one of `source` or `content` must be provided.
 
+* `timeouts` – (Optional) Per-operation timeouts (`create`, `update`). Accepts duration strings like `"5m"` or `"1h"`. Falls back to the provider `command_timeout` when not set.
+
 ## Attribute Reference
 
 * `id` – Canonical identifier of the form `<instance>:<destination>`.
