@@ -19,7 +19,7 @@ resource "multipass_alias" "ls_workspace" {
 | `name`              | String | Yes      | Alias name created on the host. Changing re-creates the resource. |
 | `instance`          | String | Yes      | Target Multipass instance. |
 | `command`           | String | Yes      | Command executed inside the instance. |
-| `working_directory` | String | No       | Working directory within the instance. |
+| `working_directory` | String | No | Working directory inside the instance. The command is automatically wrapped with `cd <dir> && exec <command>`. |
 
 ## Attributes Reference
 

@@ -68,7 +68,7 @@ type Alias struct {
 	Name             string
 	Instance         string
 	Command          string
-	WorkingDirectory string
+	WorkingDirectory string // optional explicit directory (wraps command with cd)
 }
 
 // LaunchOptions controls instance creation parameters.

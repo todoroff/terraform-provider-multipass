@@ -333,8 +333,15 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Failed to read instance", err.Error())
-		return
+		// multipass info requires SSH which is unavailable on stopped or
+		// booting instances.  Fall back to multipass list which only
+		// queries the daemon, same as refreshState does.
+		tflog.Warn(ctx, "multipass info failed in Read, falling back to list", map[string]any{"name": name, "error": err.Error()})
+		instance, err = r.getInstanceFromList(ctx, name)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to read instance", err.Error())
+			return
+		}
 	}
 
 	// Multipass keeps "soft-deleted" instances around with a Deleted state that can be
@@ -365,6 +372,8 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		}
 	}
 
+	// Ensure id is always set — important after import where only name is populated.
+	state.ID = types.StringValue(name)
 	resp.Diagnostics.Append(applyInstanceToModel(ctx, instance, &state)...)
 	if resp.Diagnostics.HasError() {
 		return

@@ -8,12 +8,17 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/todoroff/terraform-provider-multipass/internal/models"
 )
+
+// ansiRegex matches ANSI escape sequences (CSI codes, cursor movement, etc.)
+// emitted by the Multipass CLI on Windows.
+var ansiRegex = regexp.MustCompile(`(\x1b\[[0-9;]*[A-Za-z]|\r\n|\r)`)
 
 // Client exposes typed helpers for interacting with the Multipass CLI.
 type Client interface {
@@ -387,11 +392,11 @@ func (c *client) CreateAlias(ctx context.Context, alias models.Alias) error {
 	if alias.Name == "" || alias.Instance == "" || alias.Command == "" {
 		return fmt.Errorf("alias requires name, instance, and command")
 	}
-	args := []string{"alias"}
-	if alias.WorkingDirectory != "" {
-		args = append(args, "--working-directory", alias.WorkingDirectory)
-	}
-	args = append(args, fmt.Sprintf("%s:%s", alias.Instance, alias.Command))
+	args := []string{"alias", "--no-map-working-directory"}
+
+	command := aliasCommand(alias.Command, alias.WorkingDirectory)
+
+	args = append(args, fmt.Sprintf("%s:%s", alias.Instance, command))
 	args = append(args, alias.Name)
 
 	if _, err := c.run(ctx, args...); err != nil {
@@ -439,7 +444,8 @@ func (c *client) CreateSnapshot(ctx context.Context, instance, name, comment str
 	}
 
 	// Output format: "Snapshot taken: instance.snapshotName"
-	line := strings.TrimSpace(string(out))
+	// Strip ANSI escape sequences that Multipass emits on Windows.
+	line := strings.TrimSpace(ansiRegex.ReplaceAllString(string(out), ""))
 	if line == "" {
 		// Fall back to the requested name.
 		return name, nil
@@ -598,8 +604,8 @@ func (c *client) run(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %s", ErrTimeout, strings.Join(args, " "))
 	}
 
-	stdoutStr := strings.TrimSpace(stdout.String())
-	stderrStr := strings.TrimSpace(stderr.String())
+	stdoutStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stdout.String(), ""))
+	stderrStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stderr.String(), ""))
 
 	if strings.Contains(stderrStr, "does not exist") || strings.Contains(stderrStr, "not found") {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, stderrStr)
@@ -652,6 +658,23 @@ func cloneAliases(in []models.Alias) []models.Alias {
 	out := make([]models.Alias, len(in))
 	copy(out, in)
 	return out
+}
+
+// aliasCommand returns the command string for a multipass alias. When dir is
+// non-empty the command is wrapped so it executes in that directory.
+//
+// The wrapper uses bash -c '...' (single-quoted) for the outer layer so the
+// host shell / multipass stores it literally. Inside that:
+//   - dir is double-quoted so bash handles spaces and literal single quotes
+//   - single quotes in both dir and command are escaped with '\'' which
+//     closes the outer single-quote, inserts a literal quote, then re-opens
+func aliasCommand(command, dir string) string {
+	if dir != "" {
+		escapedDir := strings.ReplaceAll(dir, "'", `'\''`)
+		escapedCmd := strings.ReplaceAll(command, "'", `'\''`)
+		return fmt.Sprintf(`bash -c 'cd "%s" && exec %s'`, escapedDir, escapedCmd)
+	}
+	return command
 }
 
 func errorsIsNotFound(err error) bool {
