@@ -662,8 +662,6 @@ func cloneAliases(in []models.Alias) []models.Alias {
 
 // aliasCommand returns the command string for a multipass alias. When dir is
 // non-empty the command is wrapped so it executes in that directory.
-// aliasCommand returns the command string for a multipass alias. When dir is
-// non-empty the command is wrapped so it executes in that directory.
 //
 // The wrapper uses bash -c '...' (single-quoted) for the outer layer so the
 // host shell / multipass stores it literally. Inside that:
