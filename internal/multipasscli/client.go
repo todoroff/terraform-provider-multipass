@@ -664,8 +664,9 @@ func cloneAliases(in []models.Alias) []models.Alias {
 // non-empty the command is wrapped so it executes in that directory.
 func aliasCommand(command, dir string) string {
 	if dir != "" {
-		escaped := strings.ReplaceAll(command, "'", `'\''`)
-		return fmt.Sprintf(`bash -c 'cd "%s" && exec %s'`, dir, escaped)
+		escapedDir := strings.ReplaceAll(dir, "'", `'\''`)
+		escapedCmd := strings.ReplaceAll(command, "'", `'\''`)
+		return fmt.Sprintf(`bash -c 'cd '\''%s'\'' && exec %s'`, escapedDir, escapedCmd)
 	}
 	return command
 }
