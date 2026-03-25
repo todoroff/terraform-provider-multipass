@@ -210,10 +210,9 @@ func (r aliasesResponse) toModel() []models.Alias {
 	for _, ctx := range r.Contexts {
 		for name, entry := range ctx {
 			out = append(out, models.Alias{
-				Name:             name,
-				Instance:         entry.Instance,
-				Command:          entry.Command,
-				WorkingDirectory: entry.WorkingDirectory,
+				Name:     name,
+				Instance: entry.Instance,
+				Command:  entry.Command,
 			})
 		}
 	}

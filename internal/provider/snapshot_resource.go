@@ -153,8 +153,12 @@ func (r *snapshotResource) Read(ctx context.Context, req resource.ReadRequest, r
 	for _, s := range snapshots {
 		if s.Name == name {
 			found = true
-			// Keep comment in sync if present.
-			state.Comment = types.StringValue(s.Comment)
+			// Only update comment from the API when it's non-empty,
+			// otherwise preserve the state value (null when not set in
+			// config) to avoid triggering RequiresReplace.
+			if s.Comment != "" {
+				state.Comment = types.StringValue(s.Comment)
+			}
 			break
 		}
 	}

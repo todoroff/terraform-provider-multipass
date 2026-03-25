@@ -67,8 +67,9 @@ func (r *aliasResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Description: "Command to execute inside the instance.",
 			},
 			"working_directory": schema.StringAttribute{
-				Optional:    true,
-				Description: "Working directory inside the instance.",
+				Optional:            true,
+				Description:         "Working directory inside the instance. The command is wrapped to cd into this directory before execution.",
+				MarkdownDescription: "Working directory inside the instance. The command is wrapped with `cd <dir> && exec <command>` automatically.",
 			},
 		},
 	}
@@ -94,14 +95,7 @@ func (r *aliasResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	alias := models.Alias{
-		Name:             plan.Name.ValueString(),
-		Instance:         plan.Instance.ValueString(),
-		Command:          plan.Command.ValueString(),
-		WorkingDirectory: valueOrEmpty(plan.WorkingDirectory),
-	}
-
-	if err := r.client.CreateAlias(ctx, alias); err != nil {
+	if err := r.client.CreateAlias(ctx, aliasFromModel(&plan)); err != nil {
 		resp.Diagnostics.AddError("Failed to create alias", err.Error())
 		return
 	}
@@ -131,9 +125,11 @@ func (r *aliasResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	name := state.Name.ValueString()
 	for _, alias := range aliases {
 		if alias.Name == name {
+			state.ID = types.StringValue(name)
 			state.Instance = types.StringValue(alias.Instance)
-			state.Command = types.StringValue(alias.Command)
-			state.WorkingDirectory = types.StringValue(alias.WorkingDirectory)
+			// command and working_directory are kept from state because
+			// the API returns the wrapped command which doesn't match
+			// the user's original values.
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 			return
 		}
@@ -154,16 +150,14 @@ func (r *aliasResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
-	alias := models.Alias{
-		Name:             plan.Name.ValueString(),
-		Instance:         plan.Instance.ValueString(),
-		Command:          plan.Command.ValueString(),
-		WorkingDirectory: valueOrEmpty(plan.WorkingDirectory),
+	// Multipass aliases cannot be updated in-place; delete then recreate.
+	if err := r.client.DeleteAlias(ctx, plan.Name.ValueString()); err != nil && err != multipasscli.ErrNotFound {
+		resp.Diagnostics.AddError("Failed to delete alias for update", err.Error())
+		return
 	}
 
-	// Multipass aliases cannot be updated in-place, so recreate them.
-	if err := r.client.CreateAlias(ctx, alias); err != nil {
-		resp.Diagnostics.AddError("Failed to update alias", err.Error())
+	if err := r.client.CreateAlias(ctx, aliasFromModel(&plan)); err != nil {
+		resp.Diagnostics.AddError("Failed to recreate alias", err.Error())
 		return
 	}
 
@@ -188,4 +182,13 @@ func (r *aliasResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 func (r *aliasResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
+}
+
+func aliasFromModel(m *aliasResourceModel) models.Alias {
+	return models.Alias{
+		Name:             m.Name.ValueString(),
+		Instance:         m.Instance.ValueString(),
+		Command:          m.Command.ValueString(),
+		WorkingDirectory: valueOrEmpty(m.WorkingDirectory),
+	}
 }
