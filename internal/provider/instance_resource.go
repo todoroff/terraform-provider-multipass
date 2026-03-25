@@ -130,6 +130,11 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Description:         "If true, automatically start the instance after a successful auto-recover when it was soft-deleted outside Terraform.",
 				MarkdownDescription: "If true, automatically start the instance after a successful auto-recover when it was soft-deleted outside Terraform.",
 			},
+			"wait_for_cloud_init": schema.BoolAttribute{
+				Optional:            true,
+				Description:         "Wait for cloud-init to finish after launch before marking the resource as created. Useful when downstream resources depend on packages or configuration applied by cloud-init.",
+				MarkdownDescription: "Wait for cloud-init to finish after launch before marking the resource as created. Useful when downstream resources depend on packages or configuration applied by cloud-init.",
+			},
 			"ipv4": schema.ListAttribute{
 				Computed:            true,
 				Description:         "Assigned IPv4 addresses.",
@@ -299,6 +304,13 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 			"Launch timed out but instance was created",
 			fmt.Sprintf("The launch command timed out, but instance %q was successfully created by the Multipass daemon.", opts.Name),
 		)
+	}
+
+	if plan.WaitForCloudInit.ValueBool() {
+		tflog.Info(ctx, "Waiting for cloud-init to finish", map[string]any{"name": opts.Name})
+		if err := r.waitForCloudInit(ctx, opts.Name); err != nil {
+			resp.Diagnostics.AddWarning("cloud-init wait failed", err.Error())
+		}
 	}
 
 	if opts.Primary {
@@ -598,6 +610,7 @@ type instanceResourceModel struct {
 	Primary            types.Bool           `tfsdk:"primary"`
 	AutoRecover        types.Bool           `tfsdk:"auto_recover"`
 	AutoStartOnRecover types.Bool           `tfsdk:"auto_start_on_recover"`
+	WaitForCloudInit   types.Bool           `tfsdk:"wait_for_cloud_init"`
 	Networks           []networkConfigModel `tfsdk:"networks"`
 	Mounts             []mountConfigModel   `tfsdk:"mounts"`
 	Timeouts           timeouts.Value       `tfsdk:"timeouts"`
@@ -752,4 +765,13 @@ func (r *instanceResource) waitForInstanceAfterTimeout(ctx context.Context, name
 	}
 
 	return fmt.Errorf("instance %q did not become available within %s after launch timeout", name, timeout)
+}
+
+// waitForCloudInit runs `cloud-init status --wait` inside the instance,
+// which blocks until cloud-init reaches a terminal state (done/error/disabled).
+func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) error {
+	if err := r.client.Exec(ctx, name, []string{"cloud-init", "status", "--wait"}); err != nil {
+		return fmt.Errorf("cloud-init did not finish successfully on instance %q: %w", name, err)
+	}
+	return nil
 }
