@@ -1,0 +1,35 @@
+# Terraform Multipass Provider
+
+> A Terraform provider for managing Canonical Multipass virtual machines, aliases, snapshots, and file transfers. Source: `todoroff/multipass`. Requires Multipass CLI >= 1.13 on the host.
+
+The provider shells out to the `multipass` CLI (no REST API). It supports five resources and four data sources for full VM lifecycle management.
+
+Provider configuration accepts: `multipass_path` (default: `"multipass"` from PATH), `command_timeout` (default: `600` seconds), and `default_image` (default: `"lts"`).
+
+## Resources
+
+- [multipass_instance](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_instance.md): Manages VM lifecycle, sizing (cpus/memory/disk), cloud-init, networks, and host mounts. Changes to cpus, memory, disk, image, cloud_init, and networks force recreation. Mounts can be updated in place.
+- [multipass_alias](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_alias.md): Creates host-side command aliases that execute inside an instance. Supports working_directory for automatic `cd` wrapping.
+- [multipass_snapshot](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_snapshot.md): Manages named snapshots. Instance must be stopped. ID format: `<instance>.<snapshot>`.
+- [multipass_file_upload](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_file_upload.md): Transfers local files or inline content into instances. Exactly one of `source` or `content` required. Updates via SHA256 content_hash drift detection.
+- [multipass_file_download](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_file_download.md): Copies files from instances to the host. Use `triggers` map to force re-download. Cannot be imported.
+
+## Data Sources
+
+- [multipass_images](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_images.md): Lists launchable images and blueprints. Filterable by name, alias, kind, or substring query.
+- [multipass_networks](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_networks.md): Lists host networks available for bridged networking.
+- [multipass_instance](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_instance.md): Read-only inspection of an existing instance (state, IPs, CPU, memory, disk usage).
+- [multipass_snapshots](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_snapshots.md): Lists snapshots for a given instance. Filterable by name.
+
+## Examples
+
+- [Basic](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/basic/main.tf): Minimal instance with an alias.
+- [Dev Lab](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/dev-lab/main.tf): Multi-tier lab (DB/API/Web) with dependency ordering and shared locals.
+- [Bridged Workstation](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/bridged-workstation/main.tf): Bridged networking, host mounts, and primary instance.
+- [Cloud-Init Lab](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/cloud-init-lab/main.tf): Cloud-init from file and templatefile().
+- [File Provisioner](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/file-provisioner/main.tf): Upload and download workflows with triggers.
+
+## Optional
+
+- [Full LLM context](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/AGENTS.md): Complete provider reference with all arguments, computed attributes, inline examples, troubleshooting, and import ID formats in a single file.
+- [Examples overview](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/README.md): Descriptions of all example scenarios.
