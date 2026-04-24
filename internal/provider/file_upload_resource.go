@@ -215,22 +215,24 @@ func (r *fileUploadResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	path, cleanup, diags := r.prepareLocalSource(&plan)
+	srcPath, content, diags := r.prepareLocalSource(&plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
 
 	target := fmt.Sprintf("%s:%s", plan.Instance.ValueString(), plan.Destination.ValueString())
-	err := r.client.Transfer(ctx, multipasscli.TransferOptions{
-		Sources:     []string{path},
+	transferOpts := multipasscli.TransferOptions{
 		Destination: target,
 		Recursive:   plan.Recursive.ValueBool(),
 		Parents:     plan.CreateParents.ValueBool(),
-	})
+	}
+	if content != nil {
+		transferOpts.Stdin = content
+	} else {
+		transferOpts.Sources = []string{srcPath}
+	}
+	err := r.client.Transfer(ctx, transferOpts)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to transfer file", err.Error())
 		return
@@ -296,22 +298,24 @@ func (r *fileUploadResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	path, cleanup, diags := r.prepareLocalSource(&plan)
+	srcPath, content, diags := r.prepareLocalSource(&plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
 
 	target := fmt.Sprintf("%s:%s", plan.Instance.ValueString(), plan.Destination.ValueString())
-	err := r.client.Transfer(ctx, multipasscli.TransferOptions{
-		Sources:     []string{path},
+	transferOpts := multipasscli.TransferOptions{
 		Destination: target,
 		Recursive:   plan.Recursive.ValueBool(),
 		Parents:     plan.CreateParents.ValueBool(),
-	})
+	}
+	if content != nil {
+		transferOpts.Stdin = content
+	} else {
+		transferOpts.Sources = []string{srcPath}
+	}
+	err := r.client.Transfer(ctx, transferOpts)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to transfer file", err.Error())
 		return
@@ -383,7 +387,11 @@ func (r *fileUploadResource) computeHash(model *fileUploadResourceModel) (string
 	}
 }
 
-func (r *fileUploadResource) prepareLocalSource(model *fileUploadResourceModel) (string, func(), diag.Diagnostics) {
+// prepareLocalSource resolves the model into a form `multipass transfer` can
+// consume. For file-based uploads it returns an absolute host path. For
+// inline content it returns the bytes to pipe via stdin — avoiding a
+// temporary file that snap-confined multipass installs cannot read.
+func (r *fileUploadResource) prepareLocalSource(model *fileUploadResourceModel) (string, []byte, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	if !model.Source.IsNull() && model.Source.ValueString() != "" {
@@ -405,23 +413,7 @@ func (r *fileUploadResource) prepareLocalSource(model *fileUploadResourceModel) 
 	}
 
 	if !model.Content.IsNull() {
-		tmp, err := os.CreateTemp("", "multipass-file-*")
-		if err != nil {
-			diags.AddError("Failed to create temp file", err.Error())
-			return "", nil, diags
-		}
-		if _, err := tmp.WriteString(model.Content.ValueString()); err != nil {
-			tmp.Close()
-			os.Remove(tmp.Name())
-			diags.AddError("Failed to write temp file", err.Error())
-			return "", nil, diags
-		}
-		if err := tmp.Close(); err != nil {
-			os.Remove(tmp.Name())
-			diags.AddError("Failed to close temp file", err.Error())
-			return "", nil, diags
-		}
-		return tmp.Name(), func() { os.Remove(tmp.Name()) }, diags
+		return "", []byte(model.Content.ValueString()), diags
 	}
 
 	diags.AddError("Missing file data", "Either `source` or `content` must be provided.")

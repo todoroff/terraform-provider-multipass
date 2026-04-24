@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -72,6 +71,11 @@ type TransferOptions struct {
 	Destination string
 	Recursive   bool
 	Parents     bool
+	// Stdin, when non-nil, is piped to `multipass transfer` as the source
+	// (using `-`). This avoids writing a temporary file, which can fail on
+	// snap-confined multipass installs that cannot read host paths such as
+	// /tmp. Sources is ignored when Stdin is set.
+	Stdin []byte
 }
 
 const (
@@ -158,20 +162,6 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 		return fmt.Errorf("only one of CloudInitInline or CloudInitFile may be set")
 	}
 
-	cloudInitPath := opts.CloudInitFile
-	var cleanup func()
-	if opts.CloudInitInline != "" {
-		path, closer, err := writeTempCloudInit(opts.CloudInitInline)
-		if err != nil {
-			return err
-		}
-		cloudInitPath = path
-		cleanup = closer
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
 	args := []string{"launch"}
 	if opts.Name != "" {
 		args = append(args, "--name", opts.Name)
@@ -188,8 +178,16 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 	if opts.Disk != "" {
 		args = append(args, "--disk", opts.Disk)
 	}
-	if cloudInitPath != "" {
-		args = append(args, "--cloud-init", cloudInitPath)
+	// Inline cloud-init is piped via stdin (`--cloud-init -`) so we don't
+	// have to stage a temporary file that snap-confined multipass installs
+	// cannot read. File-based cloud-init is passed through as a path; the
+	// user is responsible for placing it somewhere multipass can see.
+	var stdin []byte
+	if opts.CloudInitInline != "" {
+		args = append(args, "--cloud-init", "-")
+		stdin = []byte(opts.CloudInitInline)
+	} else if opts.CloudInitFile != "" {
+		args = append(args, "--cloud-init", opts.CloudInitFile)
 	}
 	for _, net := range opts.Networks {
 		if net.Name == "" {
@@ -229,7 +227,7 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 	}
 	args = append(args, "--timeout", fmt.Sprintf("%d", int(cliTimeout.Seconds())))
 
-	if _, err := c.run(ctx, args...); err != nil {
+	if _, err := c.runWithStdin(ctx, stdin, args...); err != nil {
 		return err
 	}
 
@@ -252,30 +250,6 @@ func (c *client) Exec(ctx context.Context, instance string, command []string) er
 		return err
 	}
 	return nil
-}
-
-func writeTempCloudInit(content string) (string, func(), error) {
-	file, err := os.CreateTemp("", "tf-multipass-cloud-init-*.yaml")
-	if err != nil {
-		return "", nil, fmt.Errorf("unable to create temporary cloud-init file: %w", err)
-	}
-
-	cleanup := func() {
-		_ = os.Remove(file.Name())
-	}
-
-	if _, err := file.WriteString(content); err != nil {
-		file.Close()
-		cleanup()
-		return "", nil, fmt.Errorf("unable to write temporary cloud-init file: %w", err)
-	}
-
-	if err := file.Close(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("unable to flush temporary cloud-init file: %w", err)
-	}
-
-	return file.Name(), cleanup, nil
 }
 
 func (c *client) StartInstance(ctx context.Context, name string) error {
@@ -534,7 +508,7 @@ func (c *client) Unmount(ctx context.Context, instance string, mount models.Moun
 }
 
 func (c *client) Transfer(ctx context.Context, opts TransferOptions) error {
-	if len(opts.Sources) == 0 {
+	if opts.Stdin == nil && len(opts.Sources) == 0 {
 		return fmt.Errorf("at least one source is required for transfer")
 	}
 	if opts.Destination == "" {
@@ -543,13 +517,19 @@ func (c *client) Transfer(ctx context.Context, opts TransferOptions) error {
 
 	args := buildTransferArgs(opts)
 
-	if _, err := c.run(ctx, args...); err != nil {
+	if _, err := c.runWithStdin(ctx, opts.Stdin, args...); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (c *client) TransferCapture(ctx context.Context, opts TransferOptions) ([]byte, error) {
+	if opts.Stdin != nil {
+		// Capture reads bytes from multipass into memory (destination="-").
+		// Combining that with stdin input (source="-") would be nonsensical
+		// and would cause multipass to block waiting for data.
+		return nil, fmt.Errorf("stdin input is not supported for capture transfers")
+	}
 	if len(opts.Sources) == 0 {
 		return nil, fmt.Errorf("at least one source is required for transfer")
 	}
@@ -569,7 +549,11 @@ func buildTransferArgs(opts TransferOptions) []string {
 	if opts.Parents {
 		args = append(args, "--parents")
 	}
-	args = append(args, opts.Sources...)
+	if opts.Stdin != nil {
+		args = append(args, "-")
+	} else {
+		args = append(args, opts.Sources...)
+	}
 	args = append(args, opts.Destination)
 	return args
 }
@@ -592,6 +576,10 @@ func (c *client) runJSON(ctx context.Context, dest any, args ...string) error {
 }
 
 func (c *client) run(ctx context.Context, args ...string) ([]byte, error) {
+	return c.runWithStdin(ctx, nil, args...)
+}
+
+func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	// Respect per-operation deadlines set by the caller (e.g. per-resource
 	// timeouts). Only apply the client-level default when the context does
 	// not already carry a deadline.
@@ -605,6 +593,9 @@ func (c *client) run(ctx context.Context, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 
 	err := cmd.Run()
 	if err == nil {
