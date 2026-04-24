@@ -215,7 +215,7 @@ func (r *fileUploadResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	path, content, diags := r.prepareLocalSource(&plan)
+	srcPath, content, diags := r.prepareLocalSource(&plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -230,7 +230,7 @@ func (r *fileUploadResource) Create(ctx context.Context, req resource.CreateRequ
 	if content != nil {
 		transferOpts.Stdin = content
 	} else {
-		transferOpts.Sources = []string{path}
+		transferOpts.Sources = []string{srcPath}
 	}
 	err := r.client.Transfer(ctx, transferOpts)
 	if err != nil {
@@ -298,7 +298,7 @@ func (r *fileUploadResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	path, content, diags := r.prepareLocalSource(&plan)
+	srcPath, content, diags := r.prepareLocalSource(&plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -313,7 +313,7 @@ func (r *fileUploadResource) Update(ctx context.Context, req resource.UpdateRequ
 	if content != nil {
 		transferOpts.Stdin = content
 	} else {
-		transferOpts.Sources = []string{path}
+		transferOpts.Sources = []string{srcPath}
 	}
 	err := r.client.Transfer(ctx, transferOpts)
 	if err != nil {

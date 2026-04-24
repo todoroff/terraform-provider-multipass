@@ -524,6 +524,12 @@ func (c *client) Transfer(ctx context.Context, opts TransferOptions) error {
 }
 
 func (c *client) TransferCapture(ctx context.Context, opts TransferOptions) ([]byte, error) {
+	if opts.Stdin != nil {
+		// Capture reads bytes from multipass into memory (destination="-").
+		// Combining that with stdin input (source="-") would be nonsensical
+		// and would cause multipass to block waiting for data.
+		return nil, fmt.Errorf("stdin input is not supported for capture transfers")
+	}
 	if len(opts.Sources) == 0 {
 		return nil, fmt.Errorf("at least one source is required for transfer")
 	}

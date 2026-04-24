@@ -1,7 +1,9 @@
 package multipasscli
 
 import (
+	"context"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +114,24 @@ func TestBuildTransferArgs_stdinEmptyBytesStillUsesDash(t *testing.T) {
 	want := []string{"transfer", "-", "vm:/tmp/empty"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+func TestTransferCapture_rejectsStdin(t *testing.T) {
+	t.Parallel()
+	// TransferCapture reads bytes into memory via destination="-"; pairing
+	// that with Stdin (source="-") would cause multipass to block forever
+	// waiting for input. Reject it up front instead.
+	c := &client{binaryPath: "multipass"}
+	_, err := c.TransferCapture(context.Background(), TransferOptions{
+		Sources:     []string{"vm:/tmp/file"},
+		Destination: "-",
+		Stdin:       []byte("nope"),
+	})
+	if err == nil {
+		t.Fatal("expected error when Stdin is set on TransferCapture")
+	}
+	if !strings.Contains(err.Error(), "stdin") {
+		t.Fatalf("expected error to mention stdin, got: %v", err)
 	}
 }
