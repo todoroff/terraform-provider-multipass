@@ -1,6 +1,9 @@
 package multipasscli
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestAliasCommand_noDir(t *testing.T) {
 	t.Parallel()
@@ -54,5 +57,60 @@ func TestAliasCommand_dirWithSingleQuotes(t *testing.T) {
 	want := `bash -c 'cd "/tmp/user'\''s files" && exec ls'`
 	if got != want {
 		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestBuildTransferArgs_sources(t *testing.T) {
+	t.Parallel()
+	got := buildTransferArgs(TransferOptions{
+		Sources:     []string{"/host/file"},
+		Destination: "vm:/tmp/file",
+	})
+	want := []string{"transfer", "/host/file", "vm:/tmp/file"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+func TestBuildTransferArgs_recursiveAndParents(t *testing.T) {
+	t.Parallel()
+	got := buildTransferArgs(TransferOptions{
+		Sources:     []string{"/host/dir"},
+		Destination: "vm:/tmp/dir",
+		Recursive:   true,
+		Parents:     true,
+	})
+	want := []string{"transfer", "--recursive", "--parents", "/host/dir", "vm:/tmp/dir"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+func TestBuildTransferArgs_stdin(t *testing.T) {
+	t.Parallel()
+	// When Stdin is set, the source is "-" (read from stdin) and any
+	// Sources slice is ignored. This is how we avoid a tempfile for inline
+	// content so that snap-confined multipass installs can read it.
+	got := buildTransferArgs(TransferOptions{
+		Sources:     []string{"/should/be/ignored"},
+		Destination: "vm:/tmp/file",
+		Stdin:       []byte("hello"),
+	})
+	want := []string{"transfer", "-", "vm:/tmp/file"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+func TestBuildTransferArgs_stdinEmptyBytesStillUsesDash(t *testing.T) {
+	t.Parallel()
+	// A non-nil but empty byte slice still means "pipe via stdin".
+	got := buildTransferArgs(TransferOptions{
+		Destination: "vm:/tmp/empty",
+		Stdin:       []byte{},
+	})
+	want := []string{"transfer", "-", "vm:/tmp/empty"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %v\nwant %v", got, want)
 	}
 }
