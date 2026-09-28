@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -219,7 +220,7 @@ func (r *fileDownloadResource) Read(ctx context.Context, req resource.ReadReques
 	}
 
 	if _, err := r.client.GetInstance(ctx, state.Instance.ValueString()); err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			resp.State.RemoveResource(ctx)
 			return
 		}

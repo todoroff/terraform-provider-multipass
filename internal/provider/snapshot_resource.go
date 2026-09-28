@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -228,7 +229,7 @@ func (r *snapshotResource) Delete(ctx context.Context, req resource.DeleteReques
 	name := state.Name.ValueString()
 
 	if err := r.client.DeleteSnapshot(ctx, instance, name, true); err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			return
 		}
 		resp.Diagnostics.AddError("Failed to delete snapshot", err.Error())

@@ -364,7 +364,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	instance, err := r.client.GetInstance(ctx, name)
 
 	// If the instance is missing and auto_recover is enabled, attempt a recover.
-	if err == multipasscli.ErrNotFound && state.AutoRecover.ValueBool() {
+	if errors.Is(err, multipasscli.ErrNotFound) && state.AutoRecover.ValueBool() {
 		if recErr := r.client.RecoverInstance(ctx, name); recErr != nil {
 			resp.Diagnostics.AddWarning("Failed to auto-recover instance", recErr.Error())
 			resp.State.RemoveResource(ctx)
@@ -383,7 +383,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	}
 
 	if err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			tflog.Info(ctx, "Multipass instance no longer exists", map[string]any{"name": name})
 			resp.State.RemoveResource(ctx)
 			return
@@ -531,7 +531,7 @@ func (r *instanceResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	name := state.Name.ValueString()
 	if err := r.client.DeleteInstance(ctx, name, true); err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			return
 		}
 		resp.Diagnostics.AddError("Failed to delete instance", err.Error())

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -254,7 +255,7 @@ func (r *fileUploadResource) Read(ctx context.Context, req resource.ReadRequest,
 	}
 
 	if _, err := r.client.GetInstance(ctx, state.Instance.ValueString()); err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			resp.State.RemoveResource(ctx)
 			return
 		}
