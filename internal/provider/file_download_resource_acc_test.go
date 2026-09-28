@@ -25,6 +25,7 @@ resource "multipass_file_upload" "test" {
   destination = "/home/ubuntu/download-test.txt"
   content = %q
 }
+
 resource "multipass_file_download" "test" {
   instance = multipass_instance.test.name
   source = multipass_file_upload.test.destination
@@ -73,5 +74,47 @@ resource "multipass_file_download" "test" {
 			{Config: config("updated", true, "one"), Check: check("updated")},
 			{Config: config("replaced", true, "two"), Check: check("replaced")},
 		},
+	})
+}
+
+func TestAccFileDownloadResource_directory(t *testing.T) {
+	name := randomName()
+	dest := t.TempDir()
+	config := testProviderConfig + fmt.Sprintf(`
+resource "multipass_instance" "test" { name = %q }
+resource "multipass_file_upload" "test" {
+  instance = multipass_instance.test.name
+  destination = "/home/ubuntu/download-tree/nested/file.txt"
+  content = "directory contents"
+}
+resource "multipass_file_download" "absolute" {
+  instance = multipass_instance.test.name
+  source = "/home/ubuntu/download-tree"
+  destination = %q
+  recursive = true
+  depends_on = [multipass_file_upload.test]
+}
+resource "multipass_file_download" "relative" {
+  instance = multipass_instance.test.name
+  source = "download-tree"
+  destination = %q
+  recursive = true
+  depends_on = [multipass_file_upload.test]
+}
+`, name, filepath.ToSlash(filepath.Join(dest, "absolute")), filepath.ToSlash(filepath.Join(dest, "relative")))
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() { testAccPreCheck(t) }, ProtoV6ProviderFactories: testAccProtoV6ProviderFactories, CheckDestroy: testAccCheckInstanceDestroy,
+		Steps: []resource.TestStep{{Config: config, Check: func(*terraform.State) error {
+			for _, subdir := range []string{"absolute", "relative"} {
+				data, err := os.ReadFile(filepath.Join(dest, subdir, "nested", "file.txt"))
+				if err != nil {
+					return err
+				}
+				if string(data) != "directory contents" {
+					return fmt.Errorf("wrong directory contents: %q", data)
+				}
+			}
+			return nil
+		}}},
 	})
 }

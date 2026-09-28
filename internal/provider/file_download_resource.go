@@ -10,7 +10,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -504,15 +503,10 @@ func (r *fileDownloadResource) fetchDirectoryTar(ctx context.Context, model *fil
 		return nil, diags
 	}
 
-	clean := path.Clean(source)
-	baseDir := path.Dir(clean)
-	target := path.Base(clean)
-	if baseDir == "." {
-		baseDir = "/"
-	}
-
 	tmpTar := fmt.Sprintf("/tmp/multipass-download-%d.tar", time.Now().UnixNano())
-	createCmd := []string{"tar", "-C", baseDir, "-cf", tmpTar, target}
+	// Archive contents, matching the direct-transfer path's directory layout.
+	// Keeping source relative also preserves Multipass's guest working directory.
+	createCmd := []string{"tar", "-C", source, "-cf", tmpTar, "."}
 	if err := r.client.Exec(ctx, instance, createCmd); err != nil {
 		diags.AddError("Failed to archive remote directory", err.Error())
 		return nil, diags
@@ -582,7 +576,6 @@ func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, m
 	}
 
 	tr := tar.NewReader(bytes.NewReader(data))
-	destPrefix := filepath.Clean(dest) + string(os.PathSeparator)
 
 	for {
 		hdr, err := tr.Next()
@@ -594,7 +587,7 @@ func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, m
 			return diags
 		}
 
-		targetPath, err := sanitizeExtractPath(destPrefix, hdr.Name)
+		targetPath, err := sanitizeExtractPath(dest, hdr.Name)
 		if err != nil {
 			diags.AddError("Invalid archive entry", err.Error())
 			return diags
@@ -631,16 +624,12 @@ func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, m
 	return diags
 }
 
-func sanitizeExtractPath(destPrefix, name string) (string, error) {
-	cleanName := filepath.Clean(name)
-	if strings.Contains(cleanName, "..") {
-		return "", fmt.Errorf("archive entry %q contains parent directory traversal", name)
-	}
-	target := filepath.Join(destPrefix, cleanName)
-	if !strings.HasPrefix(target, destPrefix) {
+func sanitizeExtractPath(dest, name string) (string, error) {
+	localName := filepath.FromSlash(name)
+	if !filepath.IsLocal(localName) {
 		return "", fmt.Errorf("archive entry %q escapes destination", name)
 	}
-	return target, nil
+	return filepath.Join(dest, localName), nil
 }
 
 func ensureParentDir(path string, create bool) error {

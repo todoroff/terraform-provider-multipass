@@ -1,15 +1,19 @@
 package provider
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
@@ -58,6 +62,60 @@ func TestFileDownloadOwnsOnlyDownloadedFile(t *testing.T) {
 				t.Fatalf("unrelated file lost: %q %v", data, err)
 			}
 		})
+	}
+}
+
+func TestFileDownloadDirectoryContents(t *testing.T) {
+	for _, source := range []string{"/var/logs", "logs"} {
+		t.Run(source, func(t *testing.T) {
+			var archive bytes.Buffer
+			tw := tar.NewWriter(&archive)
+			for _, header := range []*tar.Header{{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}, {Name: "./app.log", Typeflag: tar.TypeReg, Mode: 0o644, Size: 3}} {
+				if err := tw.WriteHeader(header); err != nil {
+					t.Fatal(err)
+				}
+				if header.Size > 0 {
+					if _, err := tw.Write([]byte("log")); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			r := &fileDownloadResource{client: &testClient{
+				exec: func(_ context.Context, _ string, args []string) error {
+					if args[0] == "tar" && (len(args) != 6 || !reflect.DeepEqual(args[:4], []string{"tar", "-C", source, "-cf"}) || args[5] != ".") {
+						t.Errorf("archive must contain directory contents: %v", args)
+					}
+					return nil
+				},
+				transferCapture: func(context.Context, multipasscli.TransferOptions) ([]byte, error) { return archive.Bytes(), nil },
+			}}
+			model := fileDownloadResourceModel{Instance: types.StringValue("vm"), Source: types.StringValue(source), Recursive: types.BoolValue(true), Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
+			dest := filepath.Join(t.TempDir(), "output")
+			if d := r.downloadWithTar(context.Background(), &model, dest); d.HasError() {
+				t.Fatal(d)
+			}
+			data, err := os.ReadFile(filepath.Join(dest, "app.log"))
+			if err != nil || string(data) != "log" {
+				t.Fatalf("wrong directory layout: %q %v", data, err)
+			}
+		})
+	}
+}
+
+func TestSanitizeExtractPath(t *testing.T) {
+	dest := t.TempDir()
+	for _, name := range []string{".", "./app.log", "sub/file.txt", "file..txt"} {
+		if _, err := sanitizeExtractPath(dest, name); err != nil {
+			t.Errorf("valid path %q: %v", name, err)
+		}
+	}
+	for _, name := range []string{"../outside", "sub/../../outside", string(os.PathSeparator) + "outside"} {
+		if _, err := sanitizeExtractPath(dest, name); err == nil {
+			t.Errorf("accepted unsafe path %q", name)
+		}
 	}
 }
 
