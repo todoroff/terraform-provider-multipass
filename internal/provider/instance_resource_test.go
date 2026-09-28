@@ -35,3 +35,40 @@ func TestInstanceRejectsReadOnlyMountConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceReplacementPlan(t *testing.T) {
+	ctx := context.Background()
+	s := resourceSchema(NewInstanceResource())
+	for _, tc := range []struct {
+		name    string
+		field   string
+		value   any
+		replace bool
+	}{
+		{"name", "name", "renamed-vm", true},
+		{"image", "image", "24.04", true},
+		{"reset_image", "image", nil, true},
+		{"unchanged", "image", "22.04", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := map[string]any{"id": "vm", "name": "vm", "image": "22.04", "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}}
+			prior := resourceValue(s, values)
+			values[tc.field] = tc.value
+			next := resourceValue(s, values)
+			delete(values, "id")
+			server := providerserver.NewProtocol6(New("test")())()
+			resp, err := server.PlanResourceChange(ctx, &tfprotov6.PlanResourceChangeRequest{TypeName: "multipass_instance", PriorState: dynamicValue(t, prior), ProposedNewState: dynamicValue(t, next), Config: dynamicValue(t, resourceValue(s, values))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, d := range resp.Diagnostics {
+				if d.Severity == tfprotov6.DiagnosticSeverityError {
+					t.Fatalf("%s: %s", d.Summary, d.Detail)
+				}
+			}
+			if (len(resp.RequiresReplace) > 0) != tc.replace {
+				t.Fatalf("replacement paths: %v, want replacement=%t", resp.RequiresReplace, tc.replace)
+			}
+		})
+	}
+}

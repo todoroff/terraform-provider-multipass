@@ -63,11 +63,13 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Required:            true,
 				Description:         "Instance name.",
 				MarkdownDescription: "Instance name. Must be unique per Multipass host.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"image": schema.StringAttribute{
 				Optional:            true,
 				Description:         "Image alias or name (e.g., `lts`, `jammy`, `24.04`). Defaults to provider `default_image`.",
 				MarkdownDescription: "Image alias or name (e.g., `lts`, `jammy`, `24.04`). Defaults to provider `default_image`.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"cpus": schema.Int64Attribute{
 				Optional:            true,

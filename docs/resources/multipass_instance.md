@@ -68,8 +68,8 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 
 | Name              | Type    | Required | Description |
 | ----------------- | ------- | -------- | ----------- |
-| `name`            | String  | Yes      | Multipass instance name. |
-| `image`           | String  | No       | Image alias/name. Defaults to provider `default_image` or `lts`. |
+| `name`            | String  | Yes      | Multipass instance name. Forces recreation. |
+| `image`           | String  | No       | Image alias/name. Defaults to provider `default_image` or `lts`. Forces recreation. |
 | `cpus`            | Number  | No       | Virtual CPU count. Forces recreation. |
 | `memory`          | String  | No       | Memory size (`1G`, `512M`, etc.). Forces recreation. |
 | `disk`            | String  | No       | Disk size (e.g., `15G`). Forces recreation. |
@@ -104,4 +104,3 @@ Existing instances can be imported by name:
 ```bash
 terraform import multipass_instance.dev dev-box
 ```
-
