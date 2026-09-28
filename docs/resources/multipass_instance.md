@@ -85,6 +85,8 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 
 ## Attributes Reference
 
+`mounts.read_only` must be `false` or omitted. The Multipass CLI does not support read-only mounts; setting it to `true` is rejected before launch. A `:ro` suffix is a literal part of a Multipass mount path, not a permissions option.
+
 | Name             | Description |
 | ---------------- | ----------- |
 | `id`             | Instance name. |
@@ -102,5 +104,4 @@ Existing instances can be imported by name:
 ```bash
 terraform import multipass_instance.dev dev-box
 ```
-
 

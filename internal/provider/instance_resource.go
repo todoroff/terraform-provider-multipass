@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework-validators/boolvalidator"
+	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -201,7 +202,9 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 							Required: true,
 						},
 						"read_only": schema.BoolAttribute{
-							Optional: true,
+							Optional:    true,
+							Description: "Must be false or omitted. The Multipass CLI does not support read-only mounts.",
+							Validators:  []validator.Bool{boolvalidator.Equals(false)},
 						},
 					},
 				},
@@ -435,6 +438,15 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	// A value that was unknown during validation can resolve to true at
+	// apply time. Reject it before unmounting the existing configuration.
+	for i, mount := range plan.Mounts {
+		if mount.ReadOnly.ValueBool() {
+			resp.Diagnostics.AddAttributeError(path.Root("mounts").AtListIndex(i).AtName("read_only"),
+				"Unsupported read-only mount", "The Multipass CLI does not support read-only mounts. Set read_only to false or omit it.")
+			return
+		}
 	}
 
 	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)

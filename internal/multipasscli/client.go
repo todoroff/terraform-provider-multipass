@@ -158,6 +158,11 @@ func (c *client) GetInstance(ctx context.Context, name string) (*models.Instance
 }
 
 func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) error {
+	for _, mount := range opts.Mounts {
+		if mount.ReadOnly {
+			return fmt.Errorf("read-only mounts are not supported by the Multipass CLI")
+		}
+	}
 	if opts.CloudInitInline != "" && opts.CloudInitFile != "" {
 		return fmt.Errorf("only one of CloudInitInline or CloudInitFile may be set")
 	}
@@ -211,9 +216,6 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 			continue
 		}
 		spec := fmt.Sprintf("%s:%s", mount.HostPath, mount.InstancePath)
-		if mount.ReadOnly {
-			spec = spec + ":ro"
-		}
 		args = append(args, "--mount", spec)
 	}
 
@@ -458,6 +460,9 @@ func (c *client) DeleteSnapshot(ctx context.Context, instance, name string, purg
 }
 
 func (c *client) Mount(ctx context.Context, instance string, mount models.Mount) error {
+	if mount.ReadOnly {
+		return fmt.Errorf("read-only mounts are not supported by the Multipass CLI")
+	}
 	if instance == "" {
 		return fmt.Errorf("instance name is required for mount")
 	}
@@ -469,9 +474,6 @@ func (c *client) Mount(ctx context.Context, instance string, mount models.Mount)
 	}
 
 	target := fmt.Sprintf("%s:%s", instance, mount.InstancePath)
-	if mount.ReadOnly {
-		target = target + ":ro"
-	}
 
 	if _, err := c.run(ctx, "mount", mount.HostPath, target); err != nil {
 		return err
@@ -492,9 +494,6 @@ func (c *client) Unmount(ctx context.Context, instance string, mount models.Moun
 		args = []string{"umount", instance}
 	} else {
 		path := mount.InstancePath
-		if mount.ReadOnly {
-			path = path + ":ro"
-		}
 		target := fmt.Sprintf("%s:%s", instance, path)
 		args = []string{"umount", target}
 	}

@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/todoroff/terraform-provider-multipass/internal/models"
 )
 
 // Reuse the test executable as a portable CLI subprocess. No real VMs are touched.
@@ -25,6 +27,27 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestReadOnlyMountRejectedBeforeCLI(t *testing.T) {
+	for _, operation := range []string{"launch", "mount"} {
+		t.Run(operation, func(t *testing.T) {
+			c, logPath := recordingClient(t)
+			mount := models.Mount{HostPath: "/host", InstancePath: "/workspace", ReadOnly: true}
+			var err error
+			if operation == "launch" {
+				err = c.LaunchInstance(context.Background(), models.LaunchOptions{Name: "vm", Mounts: []models.Mount{mount}})
+			} else {
+				err = c.Mount(context.Background(), "vm", mount)
+			}
+			if err == nil {
+				t.Fatal("read-only mount must be rejected")
+			}
+			if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+				t.Fatal("CLI was invoked for unsupported mount")
+			}
+		})
+	}
 }
 
 func recordingClient(t *testing.T) (*client, string) {
