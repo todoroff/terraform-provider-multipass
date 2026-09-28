@@ -41,8 +41,18 @@ func dynamicValue(t *testing.T, value tftypes.Value) *tfprotov6.DynamicValue {
 // accepting an unimplemented mock operation.
 type testClient struct {
 	multipasscli.Client
+	launchInstance  func(context.Context, models.LaunchOptions) error
+	exec            func(context.Context, string, []string) error
 	getInstance     func(context.Context, string) (*models.Instance, error)
 	transferCapture func(context.Context, multipasscli.TransferOptions) ([]byte, error)
+}
+
+func (c *testClient) LaunchInstance(ctx context.Context, opts models.LaunchOptions) error {
+	return c.launchInstance(ctx, opts)
+}
+
+func (c *testClient) Exec(ctx context.Context, instance string, command []string) error {
+	return c.exec(ctx, instance, command)
 }
 
 func (c *testClient) GetInstance(ctx context.Context, name string) (*models.Instance, error) {

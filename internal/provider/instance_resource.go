@@ -314,7 +314,15 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	if plan.WaitForCloudInit.ValueBool() {
 		tflog.Info(ctx, "Waiting for cloud-init to finish", map[string]any{"name": opts.Name})
 		if err := r.waitForCloudInit(createCtx, opts.Name); err != nil {
-			resp.Diagnostics.AddWarning("cloud-init wait failed", err.Error())
+			// The VM already exists. Persist it before returning an error so
+			// Terraform can clean up or replace the failed creation, while
+			// preventing dependent resources from running.
+			resp.Diagnostics.Append(r.refreshState(ctx, opts.Name, &plan)...)
+			if !resp.Diagnostics.HasError() {
+				resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+			}
+			resp.Diagnostics.AddError("cloud-init wait failed", err.Error())
+			return
 		}
 	}
 

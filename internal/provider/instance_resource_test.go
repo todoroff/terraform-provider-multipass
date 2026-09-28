@@ -2,11 +2,16 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+	"github.com/todoroff/terraform-provider-multipass/internal/models"
 )
 
 func TestInstanceRejectsReadOnlyMountConfig(t *testing.T) {
@@ -33,6 +38,42 @@ func TestInstanceRejectsReadOnlyMountConfig(t *testing.T) {
 		if hasError != readOnly {
 			t.Fatalf("read_only=%t diagnostics: %v", readOnly, resp.Diagnostics)
 		}
+	}
+}
+
+func TestInstanceCloudInitResult(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wait    bool
+		waitErr error
+	}{
+		{"success", true, nil}, {"failure", true, errors.New("cloud-init exited 1")}, {"timeout", true, context.DeadlineExceeded}, {"disabled", false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			waitCalls := 0
+			r := &instanceResource{commandTimeout: time.Second, client: &testClient{
+				launchInstance: func(context.Context, models.LaunchOptions) error { return nil },
+				exec:           func(_ context.Context, _ string, command []string) error { waitCalls++; return tc.waitErr },
+			}}
+			s := resourceSchema(r)
+			plan := tfsdk.Plan{Schema: s, Raw: resourceValue(s, map[string]any{"name": "vm", "wait_for_cloud_init": tc.wait, "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}})}
+			resp := resource.CreateResponse{State: tfsdk.State{Schema: s}}
+			r.Create(ctx, resource.CreateRequest{Plan: plan}, &resp)
+			if resp.Diagnostics.HasError() != (tc.waitErr != nil) {
+				t.Fatalf("diagnostics: %v", resp.Diagnostics)
+			}
+			var state instanceResourceModel
+			if d := resp.State.Get(ctx, &state); d.HasError() {
+				t.Fatal(d)
+			}
+			if state.ID.ValueString() != "vm" {
+				t.Fatal("created VM must remain in state even when cloud-init fails")
+			}
+			if (waitCalls == 1) != tc.wait {
+				t.Fatalf("wait calls=%d", waitCalls)
+			}
+		})
 	}
 }
 

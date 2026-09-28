@@ -87,6 +87,8 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 
 `mounts.read_only` must be `false` or omitted. The Multipass CLI does not support read-only mounts; setting it to `true` is rejected before launch. A `:ro` suffix is a literal part of a Multipass mount path, not a permissions option.
 
+With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry.
+
 | Name             | Description |
 | ---------------- | ----------- |
 | `id`             | Instance name. |
