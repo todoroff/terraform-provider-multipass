@@ -83,11 +83,13 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | `mounts`          | Block   | No       | Optional repeated block configuring host mounts. Attributes: `host_path`, `instance_path`, `read_only`. |
 | `timeouts`        | Block   | No       | Per-operation timeouts (`create`, `read`, `update`, `delete`). Accepts duration strings like `"20m"` or `"1h"`. Falls back to the provider `command_timeout` when not set. |
 
-## Attributes Reference
+## Behavior
 
 `mounts.read_only` must be `false` or omitted. The Multipass CLI does not support read-only mounts; setting it to `true` is rejected before launch. A `:ro` suffix is a literal part of a Multipass mount path, not a permissions option.
 
 With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry.
+
+## Attributes Reference
 
 | Name             | Description |
 | ---------------- | ----------- |

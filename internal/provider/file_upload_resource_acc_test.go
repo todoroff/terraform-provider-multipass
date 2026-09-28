@@ -48,7 +48,7 @@ resource "multipass_instance" "test" { name = %q }
 resource "multipass_file_upload" "test" {
   instance = multipass_instance.test.name
   destination = "/home/ubuntu/computed.env"
-  content = "IP=${multipass_instance.test.ipv4[0]}"
+  content = "INSTANCE=${multipass_instance.test.id}"
 }
 `, instanceName),
 			Check: func(state *terraform.State) error {
@@ -61,7 +61,7 @@ resource "multipass_file_upload" "test" {
 				if err != nil {
 					return err
 				}
-				want := "IP=" + state.RootModule().Resources["multipass_instance.test"].Primary.Attributes["ipv4.0"]
+				want := "INSTANCE=" + state.RootModule().Resources["multipass_instance.test"].Primary.Attributes["id"]
 				if string(data) != want {
 					return fmt.Errorf("remote content %q, want %q", data, want)
 				}

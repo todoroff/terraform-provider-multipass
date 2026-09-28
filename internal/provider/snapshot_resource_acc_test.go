@@ -3,7 +3,9 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
@@ -79,13 +81,34 @@ func TestAccSnapshotResource_withComment(t *testing.T) {
 // stopInstance stops a Multipass instance via the CLI client.
 func stopInstance(t *testing.T, name string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 	client, err := multipasscli.NewClient(ctx, multipasscli.Config{})
 	if err != nil {
 		t.Fatalf("failed to create client to stop instance: %v", err)
 	}
 	if err := client.StopInstance(ctx, name, false); err != nil {
 		t.Fatalf("failed to stop instance %s: %v", name, err)
+	}
+	// Some backends return from stop while the guest is still shutting down.
+	// Snapshot tests must wait for the actual daemon state before applying.
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		instances, err := client.ListInstances(ctx, true)
+		if err != nil {
+			t.Fatalf("checking stopped instance %s: %v", name, err)
+		}
+		for _, instance := range instances {
+			if instance.Name == name && strings.EqualFold(instance.State, "Stopped") {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("instance %s did not stop: %v", name, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 

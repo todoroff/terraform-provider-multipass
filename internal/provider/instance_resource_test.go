@@ -41,6 +41,29 @@ func TestInstanceRejectsReadOnlyMountConfig(t *testing.T) {
 	}
 }
 
+func TestInstanceRejectsReadOnlyMountBeforeUpdating(t *testing.T) {
+	ctx := context.Background()
+	// No mock mutating methods are provided: any attempted unmount or mount
+	// panics, proving validation happens before changing existing mounts.
+	r := &instanceResource{client: &testClient{}, commandTimeout: time.Second}
+	s := resourceSchema(r)
+	typ := s.Type().TerraformType(ctx).(tftypes.Object)
+	mountType := typ.AttributeTypes["mounts"].(tftypes.List).ElementType
+	mount := tftypes.NewValue(mountType, map[string]tftypes.Value{
+		"host_path":     tftypes.NewValue(tftypes.String, "/host"),
+		"instance_path": tftypes.NewValue(tftypes.String, "/workspace"),
+		"read_only":     tftypes.NewValue(tftypes.Bool, true),
+	})
+	values := map[string]any{"id": "vm", "name": "vm", "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}}
+	state := tfsdk.State{Schema: s, Raw: resourceValue(s, values)}
+	values["mounts"] = []tftypes.Value{mount}
+	resp := resource.UpdateResponse{State: state}
+	r.Update(ctx, resource.UpdateRequest{Plan: tfsdk.Plan{Schema: s, Raw: resourceValue(s, values)}, State: state}, &resp)
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected read-only mount rejection")
+	}
+}
+
 func TestInstanceCloudInitResult(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
