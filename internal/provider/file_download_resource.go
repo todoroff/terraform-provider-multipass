@@ -137,9 +137,6 @@ func (r *fileDownloadResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Computed:            true,
 				Description:         "SHA256 hash of the downloaded payload.",
 				MarkdownDescription: "SHA256 hash of the downloaded payload.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 		},
 		Blocks: map[string]schema.Block{

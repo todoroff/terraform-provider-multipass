@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
@@ -55,6 +58,39 @@ func TestFileDownloadOwnsOnlyDownloadedFile(t *testing.T) {
 				t.Fatalf("unrelated file lost: %q %v", data, err)
 			}
 		})
+	}
+}
+
+func TestFileDownloadUpdatePlansNewHash(t *testing.T) {
+	ctx := context.Background()
+	s := resourceSchema(NewFileDownloadResource())
+	values := map[string]any{"id": "download", "instance": "vm", "source": "/tmp/file", "destination": "file", "recursive": false, "create_parents": true, "overwrite": false, "content_hash": "old-hash", "resolved_destination": "/file"}
+	prior := resourceValue(s, values)
+	values["overwrite"] = true
+	next := resourceValue(s, values)
+	delete(values, "id")
+	delete(values, "content_hash")
+	delete(values, "resolved_destination")
+	server := providerserver.NewProtocol6(New("test")())()
+	resp, err := server.PlanResourceChange(ctx, &tfprotov6.PlanResourceChangeRequest{TypeName: "multipass_file_download", PriorState: dynamicValue(t, prior), ProposedNewState: dynamicValue(t, next), Config: dynamicValue(t, resourceValue(s, values))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range resp.Diagnostics {
+		if d.Severity == tfprotov6.DiagnosticSeverityError {
+			t.Fatalf("%s: %s", d.Summary, d.Detail)
+		}
+	}
+	v, err := resp.PlannedState.Unmarshal(next.Type())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attrs map[string]tftypes.Value
+	if err := v.As(&attrs); err != nil {
+		t.Fatal(err)
+	}
+	if attrs["content_hash"].IsKnown() {
+		t.Fatalf("fresh download hash must be unknown, got %s", attrs["content_hash"])
 	}
 }
 
