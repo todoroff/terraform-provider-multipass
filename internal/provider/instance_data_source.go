@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -112,7 +113,7 @@ func (d *instanceDataSource) Read(ctx context.Context, req datasource.ReadReques
 
 	instance, err := d.client.GetInstance(ctx, config.Name.ValueString())
 	if err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			resp.Diagnostics.AddError("Instance not found", "The requested Multipass instance does not exist.")
 			return
 		}

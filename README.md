@@ -108,6 +108,26 @@ For local hacking you can still build from source via:
 go build ./cmd/terraform-provider-multipass
 ```
 
+### Tests
+
+Run unit tests and static checks without creating VMs:
+
+```bash
+go test ./...
+go vet ./...
+```
+
+Acceptance tests use real Multipass instances and remove their test resources afterward. They require a running Multipass daemon and Terraform or OpenTofu. Set the provider namespace because the test configurations use `todoroff/multipass` explicitly.
+
+```powershell
+$env:TF_ACC = "1"
+$env:TF_ACC_PROVIDER_NAMESPACE = "todoroff"
+$env:TF_ACC_TERRAFORM_PATH = (Get-Command tofu).Source # or terraform
+go test ./internal/multipasscli ./internal/provider -p 1 -run '^TestAcc' -count=1 -v -timeout 30m
+```
+
+On Linux/macOS, set the same environment variables before running the Go command. Leave `TF_ACC` unset for unit tests. The suite covers scoped VM deletion, instance replacement, cloud-init failure and retry, computed uploads, download contents and ownership, aliases, data sources, and snapshots.
+
 ### CI & Releases
 
 - CI runs on GitHub Actions (`.github/workflows/ci.yml`) and executes `go test ./...` across a small matrix of Go versions and OSes.

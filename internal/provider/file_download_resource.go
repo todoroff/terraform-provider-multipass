@@ -4,13 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -46,16 +46,17 @@ type fileDownloadResource struct {
 }
 
 type fileDownloadResourceModel struct {
-	ID            types.String   `tfsdk:"id"`
-	Instance      types.String   `tfsdk:"instance"`
-	Source        types.String   `tfsdk:"source"`
-	Destination   types.String   `tfsdk:"destination"`
-	Recursive     types.Bool     `tfsdk:"recursive"`
-	CreateParents types.Bool     `tfsdk:"create_parents"`
-	Overwrite     types.Bool     `tfsdk:"overwrite"`
-	Triggers      types.Map      `tfsdk:"triggers"`
-	ContentHash   types.String   `tfsdk:"content_hash"`
-	Timeouts      timeouts.Value `tfsdk:"timeouts"`
+	ID                  types.String   `tfsdk:"id"`
+	Instance            types.String   `tfsdk:"instance"`
+	Source              types.String   `tfsdk:"source"`
+	Destination         types.String   `tfsdk:"destination"`
+	ResolvedDestination types.String   `tfsdk:"resolved_destination"`
+	Recursive           types.Bool     `tfsdk:"recursive"`
+	CreateParents       types.Bool     `tfsdk:"create_parents"`
+	Overwrite           types.Bool     `tfsdk:"overwrite"`
+	Triggers            types.Map      `tfsdk:"triggers"`
+	ContentHash         types.String   `tfsdk:"content_hash"`
+	Timeouts            timeouts.Value `tfsdk:"timeouts"`
 }
 
 func (r *fileDownloadResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -105,6 +106,10 @@ func (r *fileDownloadResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Description:         "Set true when downloading directories (maps to `multipass transfer --recursive`).",
 				MarkdownDescription: "Set true when downloading directories (maps to `multipass transfer --recursive`).",
 			},
+			"resolved_destination": schema.StringAttribute{
+				Computed:    true,
+				Description: "Absolute local path owned by this resource. For a file downloaded into a directory, this includes the source filename.",
+			},
 			"create_parents": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
@@ -132,9 +137,6 @@ func (r *fileDownloadResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Computed:            true,
 				Description:         "SHA256 hash of the downloaded payload.",
 				MarkdownDescription: "SHA256 hash of the downloaded payload.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 		},
 		Blocks: map[string]schema.Block{
@@ -218,7 +220,7 @@ func (r *fileDownloadResource) Read(ctx context.Context, req resource.ReadReques
 	}
 
 	if _, err := r.client.GetInstance(ctx, state.Instance.ValueString()); err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -226,11 +228,20 @@ func (r *fileDownloadResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	if _, err := os.Stat(state.Destination.ValueString()); os.IsNotExist(err) {
+	dest, err := downloadedPath(&state)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid destination", err.Error())
+		return
+	}
+	if _, err := os.Stat(dest); os.IsNotExist(err) {
 		resp.Diagnostics.AddWarning("Destination missing", "Local destination is missing; resource will be recreated on next apply.")
 		resp.State.RemoveResource(ctx)
 		return
+	} else if err != nil {
+		resp.Diagnostics.AddError("Failed to inspect destination", err.Error())
+		return
 	}
+	state.ResolvedDestination = types.StringValue(dest)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -270,14 +281,45 @@ func (r *fileDownloadResource) Delete(ctx context.Context, req resource.DeleteRe
 		return
 	}
 
-	dest := state.Destination.ValueString()
-	if dest == "" {
+	if state.Destination.ValueString() == "" {
 		return
 	}
-
-	if err := os.RemoveAll(dest); err != nil && !os.IsNotExist(err) {
-		resp.Diagnostics.AddWarning("Failed to remove destination", err.Error())
+	dest, err := downloadedPath(&state)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid destination", err.Error())
+		return
 	}
+	if state.Recursive.ValueBool() {
+		err = os.RemoveAll(dest)
+	} else {
+		// A file destination must never recursively remove a directory, even
+		// if an external process has replaced the downloaded file with one.
+		err = os.Remove(dest)
+	}
+	if err != nil && !os.IsNotExist(err) {
+		resp.Diagnostics.AddError("Failed to remove destination", err.Error())
+	}
+}
+
+func downloadedPath(model *fileDownloadResourceModel) (string, error) {
+	if hasStringValue(model.ResolvedDestination) {
+		return model.ResolvedDestination.ValueString(), nil
+	}
+	// Older states do not record the resolved path. Match the file-writing
+	// behavior when interpreting their configured destination.
+	if model.Destination.ValueString() == "" {
+		return "", fmt.Errorf("destination must be non-empty")
+	}
+	dest, err := filepath.Abs(model.Destination.ValueString())
+	if err != nil {
+		return "", err
+	}
+	if !model.Recursive.ValueBool() {
+		if info, err := os.Stat(dest); err == nil && info.IsDir() {
+			dest = filepath.Join(dest, path.Base(model.Source.ValueString()))
+		}
+	}
+	return dest, nil
 }
 
 func (r *fileDownloadResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -287,9 +329,13 @@ func (r *fileDownloadResource) ImportState(ctx context.Context, req resource.Imp
 func (r *fileDownloadResource) downloadAndWrite(ctx context.Context, model *fileDownloadResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	dest := filepath.Clean(model.Destination.ValueString())
-	if dest == "" {
+	if model.Destination.ValueString() == "" {
 		diags.AddError("Invalid destination", "Destination must be non-empty")
+		return diags
+	}
+	dest, err := filepath.Abs(model.Destination.ValueString())
+	if err != nil {
+		diags.AddError("Invalid destination", err.Error())
 		return diags
 	}
 
@@ -339,6 +385,7 @@ func (r *fileDownloadResource) downloadDirect(ctx context.Context, model *fileDo
 			return diags
 		}
 		model.ContentHash = types.StringValue(hashValue)
+		model.ResolvedDestination = types.StringValue(dest)
 		return diags
 	}
 
@@ -407,6 +454,7 @@ func (r *fileDownloadResource) downloadWithTar(ctx context.Context, model *fileD
 			return diags
 		}
 		model.ContentHash = types.StringValue(hashValue)
+		model.ResolvedDestination = types.StringValue(dest)
 		return diags
 	}
 
@@ -456,15 +504,10 @@ func (r *fileDownloadResource) fetchDirectoryTar(ctx context.Context, model *fil
 		return nil, diags
 	}
 
-	clean := path.Clean(source)
-	baseDir := path.Dir(clean)
-	target := path.Base(clean)
-	if baseDir == "." {
-		baseDir = "/"
-	}
-
 	tmpTar := fmt.Sprintf("/tmp/multipass-download-%d.tar", time.Now().UnixNano())
-	createCmd := []string{"tar", "-C", baseDir, "-cf", tmpTar, target}
+	// Archive contents, matching the direct-transfer path's directory layout.
+	// Keeping source relative also preserves Multipass's guest working directory.
+	createCmd := []string{"tar", "-C", source, "-cf", tmpTar, "."}
 	if err := r.client.Exec(ctx, instance, createCmd); err != nil {
 		diags.AddError("Failed to archive remote directory", err.Error())
 		return nil, diags
@@ -487,7 +530,7 @@ func (r *fileDownloadResource) writeFileBytes(data []byte, dest string, model *f
 
 	destPath := dest
 	if info, err := os.Stat(dest); err == nil && info.IsDir() {
-		destPath = filepath.Join(dest, filepath.Base(model.Source.ValueString()))
+		destPath = filepath.Join(dest, path.Base(model.Source.ValueString()))
 	}
 
 	if _, err := os.Stat(destPath); err == nil && !model.Overwrite.ValueBool() {
@@ -504,6 +547,7 @@ func (r *fileDownloadResource) writeFileBytes(data []byte, dest string, model *f
 		diags.AddError("Failed to write destination file", err.Error())
 		return diags
 	}
+	model.ResolvedDestination = types.StringValue(destPath)
 
 	return diags
 }
@@ -533,7 +577,6 @@ func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, m
 	}
 
 	tr := tar.NewReader(bytes.NewReader(data))
-	destPrefix := filepath.Clean(dest) + string(os.PathSeparator)
 
 	for {
 		hdr, err := tr.Next()
@@ -545,7 +588,7 @@ func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, m
 			return diags
 		}
 
-		targetPath, err := sanitizeExtractPath(destPrefix, hdr.Name)
+		targetPath, err := sanitizeExtractPath(dest, hdr.Name)
 		if err != nil {
 			diags.AddError("Invalid archive entry", err.Error())
 			return diags
@@ -582,16 +625,12 @@ func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, m
 	return diags
 }
 
-func sanitizeExtractPath(destPrefix, name string) (string, error) {
-	cleanName := filepath.Clean(name)
-	if strings.Contains(cleanName, "..") {
-		return "", fmt.Errorf("archive entry %q contains parent directory traversal", name)
-	}
-	target := filepath.Join(destPrefix, cleanName)
-	if !strings.HasPrefix(target, destPrefix) {
+func sanitizeExtractPath(dest, name string) (string, error) {
+	localName := filepath.FromSlash(name)
+	if !filepath.IsLocal(localName) {
 		return "", fmt.Errorf("archive entry %q escapes destination", name)
 	}
-	return target, nil
+	return filepath.Join(dest, localName), nil
 }
 
 func ensureParentDir(path string, create bool) error {

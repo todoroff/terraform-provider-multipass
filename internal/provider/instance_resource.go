@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework-validators/boolvalidator"
+	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -62,11 +63,13 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Required:            true,
 				Description:         "Instance name.",
 				MarkdownDescription: "Instance name. Must be unique per Multipass host.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"image": schema.StringAttribute{
 				Optional:            true,
 				Description:         "Image alias or name (e.g., `lts`, `jammy`, `24.04`). Defaults to provider `default_image`.",
 				MarkdownDescription: "Image alias or name (e.g., `lts`, `jammy`, `24.04`). Defaults to provider `default_image`.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"cpus": schema.Int64Attribute{
 				Optional:            true,
@@ -201,7 +204,9 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 							Required: true,
 						},
 						"read_only": schema.BoolAttribute{
-							Optional: true,
+							Optional:    true,
+							Description: "Must be false or omitted. The Multipass CLI does not support read-only mounts.",
+							Validators:  []validator.Bool{boolvalidator.Equals(false)},
 						},
 					},
 				},
@@ -309,7 +314,15 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	if plan.WaitForCloudInit.ValueBool() {
 		tflog.Info(ctx, "Waiting for cloud-init to finish", map[string]any{"name": opts.Name})
 		if err := r.waitForCloudInit(createCtx, opts.Name); err != nil {
-			resp.Diagnostics.AddWarning("cloud-init wait failed", err.Error())
+			// The VM already exists. Persist it before returning an error so
+			// Terraform can clean up or replace the failed creation, while
+			// preventing dependent resources from running.
+			resp.Diagnostics.Append(r.refreshState(ctx, opts.Name, &plan)...)
+			if !resp.Diagnostics.HasError() {
+				resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+			}
+			resp.Diagnostics.AddError("cloud-init wait failed", err.Error())
+			return
 		}
 	}
 
@@ -351,7 +364,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	instance, err := r.client.GetInstance(ctx, name)
 
 	// If the instance is missing and auto_recover is enabled, attempt a recover.
-	if err == multipasscli.ErrNotFound && state.AutoRecover.ValueBool() {
+	if errors.Is(err, multipasscli.ErrNotFound) && state.AutoRecover.ValueBool() {
 		if recErr := r.client.RecoverInstance(ctx, name); recErr != nil {
 			resp.Diagnostics.AddWarning("Failed to auto-recover instance", recErr.Error())
 			resp.State.RemoveResource(ctx)
@@ -370,7 +383,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	}
 
 	if err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			tflog.Info(ctx, "Multipass instance no longer exists", map[string]any{"name": name})
 			resp.State.RemoveResource(ctx)
 			return
@@ -435,6 +448,15 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	// A value that was unknown during validation can resolve to true at
+	// apply time. Reject it before unmounting the existing configuration.
+	for i, mount := range plan.Mounts {
+		if mount.ReadOnly.ValueBool() {
+			resp.Diagnostics.AddAttributeError(path.Root("mounts").AtListIndex(i).AtName("read_only"),
+				"Unsupported read-only mount", "The Multipass CLI does not support read-only mounts. Set read_only to false or omit it.")
+			return
+		}
 	}
 
 	updateTimeout, diags := plan.Timeouts.Update(ctx, r.commandTimeout)
@@ -509,7 +531,7 @@ func (r *instanceResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	name := state.Name.ValueString()
 	if err := r.client.DeleteInstance(ctx, name, true); err != nil {
-		if err == multipasscli.ErrNotFound {
+		if errors.Is(err, multipasscli.ErrNotFound) {
 			return
 		}
 		resp.Diagnostics.AddError("Failed to delete instance", err.Error())

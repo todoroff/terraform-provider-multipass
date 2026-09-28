@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -151,7 +152,7 @@ func (r *aliasResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	// Multipass aliases cannot be updated in-place; delete then recreate.
-	if err := r.client.DeleteAlias(ctx, plan.Name.ValueString()); err != nil && err != multipasscli.ErrNotFound {
+	if err := r.client.DeleteAlias(ctx, plan.Name.ValueString()); err != nil && !errors.Is(err, multipasscli.ErrNotFound) {
 		resp.Diagnostics.AddError("Failed to delete alias for update", err.Error())
 		return
 	}
@@ -175,7 +176,7 @@ func (r *aliasResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		return
 	}
 
-	if err := r.client.DeleteAlias(ctx, state.Name.ValueString()); err != nil && err != multipasscli.ErrNotFound {
+	if err := r.client.DeleteAlias(ctx, state.Name.ValueString()); err != nil && !errors.Is(err, multipasscli.ErrNotFound) {
 		resp.Diagnostics.AddError("Failed to delete alias", err.Error())
 	}
 }

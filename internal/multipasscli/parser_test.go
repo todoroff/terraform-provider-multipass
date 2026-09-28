@@ -66,3 +66,14 @@ func TestInfoResponseToModel(t *testing.T) {
 		t.Fatalf("unexpected mounts: %#v", model.Mounts)
 	}
 }
+
+func TestMountPathSuffixIsLiteral(t *testing.T) {
+	response := infoResponse{Info: map[string]infoEntry{"vm": {Mounts: map[string]mountEntry{"/workspace:ro": {SourcePath: "/host"}}}}}
+	instance, err := response.toModel("vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.Mounts[0].InstancePath != "/workspace:ro" || instance.Mounts[0].ReadOnly {
+		t.Fatalf("mount path suffix is not a permission flag: %#v", instance.Mounts[0])
+	}
+}

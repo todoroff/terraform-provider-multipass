@@ -1,10 +1,13 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
 func TestAccFileUploadResource_content(t *testing.T) {
@@ -30,6 +33,41 @@ func TestAccFileUploadResource_content(t *testing.T) {
 				Check:  resource.TestCheckResourceAttrSet(rn, "content_hash"),
 			},
 		},
+	})
+}
+
+func TestAccFileUploadResource_computedContent(t *testing.T) {
+	instanceName := randomName()
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckInstanceDestroy,
+		Steps: []resource.TestStep{{
+			Config: testProviderConfig + fmt.Sprintf(`
+resource "multipass_instance" "test" { name = %q }
+resource "multipass_file_upload" "test" {
+  instance = multipass_instance.test.name
+  destination = "/home/ubuntu/computed.env"
+  content = "INSTANCE=${multipass_instance.test.id}"
+}
+`, instanceName),
+			Check: func(state *terraform.State) error {
+				ctx := context.Background()
+				client, err := multipasscli.NewClient(ctx, multipasscli.Config{Timeout: 30})
+				if err != nil {
+					return err
+				}
+				data, err := client.TransferCapture(ctx, multipasscli.TransferOptions{Sources: []string{instanceName + ":/home/ubuntu/computed.env"}, Destination: "-"})
+				if err != nil {
+					return err
+				}
+				want := "INSTANCE=" + state.RootModule().Resources["multipass_instance.test"].Primary.Attributes["id"]
+				if string(data) != want {
+					return fmt.Errorf("remote content %q, want %q", data, want)
+				}
+				return nil
+			},
+		}},
 	})
 }
 

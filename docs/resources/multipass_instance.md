@@ -68,8 +68,8 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 
 | Name              | Type    | Required | Description |
 | ----------------- | ------- | -------- | ----------- |
-| `name`            | String  | Yes      | Multipass instance name. |
-| `image`           | String  | No       | Image alias/name. Defaults to provider `default_image` or `lts`. |
+| `name`            | String  | Yes      | Multipass instance name. Forces recreation. |
+| `image`           | String  | No       | Image alias/name. Defaults to provider `default_image` or `lts`. Forces recreation. |
 | `cpus`            | Number  | No       | Virtual CPU count. Forces recreation. |
 | `memory`          | String  | No       | Memory size (`1G`, `512M`, etc.). Forces recreation. |
 | `disk`            | String  | No       | Disk size (e.g., `15G`). Forces recreation. |
@@ -82,6 +82,12 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | `networks`        | Block   | No       | Optional repeated block configuring host networks. Attributes: `name` (required), `mode`, `mac`. |
 | `mounts`          | Block   | No       | Optional repeated block configuring host mounts. Attributes: `host_path`, `instance_path`, `read_only`. |
 | `timeouts`        | Block   | No       | Per-operation timeouts (`create`, `read`, `update`, `delete`). Accepts duration strings like `"20m"` or `"1h"`. Falls back to the provider `command_timeout` when not set. |
+
+## Behavior
+
+`mounts.read_only` must be `false` or omitted. The Multipass CLI does not support read-only mounts; setting it to `true` is rejected before launch. A `:ro` suffix is a literal part of a Multipass mount path, not a permissions option.
+
+With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry.
 
 ## Attributes Reference
 
@@ -102,5 +108,3 @@ Existing instances can be imported by name:
 ```bash
 terraform import multipass_instance.dev dev-box
 ```
-
-

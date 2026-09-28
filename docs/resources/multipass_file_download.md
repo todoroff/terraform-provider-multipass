@@ -43,11 +43,11 @@ resource "multipass_file_download" "logs" {
 
 ## Attribute Reference
 
+* `resolved_destination` - Absolute path owned by the resource. When a file is downloaded into an existing directory, this is the path of the downloaded child file.
 * `id` – Identifier in the form `<instance>:<source>-><destination>`.
 * `content_hash` – SHA256 hash of the downloaded payload, useful for `triggers` or downstream outputs.
 
 ## Behavior & Notes
 
-* Destroying the resource removes the local `destination` to keep parity with Terraform's lifecycle expectations.
+* Destroying a file download removes only the downloaded file, including when `destination` is an existing directory. Other files in that directory are preserved. A recursive download owns and removes its destination directory.
 * Downloads run during `create`/`update`. To rerun without a configuration change, adjust `triggers`, taint the resource, or use `terraform apply -replace=multipass_file_download.example`.
-

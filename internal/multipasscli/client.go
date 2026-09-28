@@ -158,6 +158,11 @@ func (c *client) GetInstance(ctx context.Context, name string) (*models.Instance
 }
 
 func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) error {
+	for _, mount := range opts.Mounts {
+		if mount.ReadOnly {
+			return fmt.Errorf("read-only mounts are not supported by the Multipass CLI")
+		}
+	}
 	if opts.CloudInitInline != "" && opts.CloudInitFile != "" {
 		return fmt.Errorf("only one of CloudInitInline or CloudInitFile may be set")
 	}
@@ -211,9 +216,6 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 			continue
 		}
 		spec := fmt.Sprintf("%s:%s", mount.HostPath, mount.InstancePath)
-		if mount.ReadOnly {
-			spec = spec + ":ro"
-		}
 		args = append(args, "--mount", spec)
 	}
 
@@ -277,13 +279,13 @@ func (c *client) RestartInstance(ctx context.Context, name string) error {
 }
 
 func (c *client) DeleteInstance(ctx context.Context, name string, purge bool) error {
-	if err := c.runSimple(ctx, "delete", name); err != nil {
-		return err
-	}
+	args := []string{"delete"}
 	if purge {
-		if err := c.runSimple(ctx, "purge"); err != nil {
-			return err
-		}
+		args = append(args, "--purge")
+	}
+	args = append(args, name)
+	if err := c.runSimple(ctx, args...); err != nil {
+		return err
 	}
 	c.invalidateInstances()
 	return nil
@@ -458,6 +460,9 @@ func (c *client) DeleteSnapshot(ctx context.Context, instance, name string, purg
 }
 
 func (c *client) Mount(ctx context.Context, instance string, mount models.Mount) error {
+	if mount.ReadOnly {
+		return fmt.Errorf("read-only mounts are not supported by the Multipass CLI")
+	}
 	if instance == "" {
 		return fmt.Errorf("instance name is required for mount")
 	}
@@ -469,9 +474,6 @@ func (c *client) Mount(ctx context.Context, instance string, mount models.Mount)
 	}
 
 	target := fmt.Sprintf("%s:%s", instance, mount.InstancePath)
-	if mount.ReadOnly {
-		target = target + ":ro"
-	}
 
 	if _, err := c.run(ctx, "mount", mount.HostPath, target); err != nil {
 		return err
@@ -492,9 +494,6 @@ func (c *client) Unmount(ctx context.Context, instance string, mount models.Moun
 		args = []string{"umount", instance}
 	} else {
 		path := mount.InstancePath
-		if mount.ReadOnly {
-			path = path + ":ro"
-		}
 		target := fmt.Sprintf("%s:%s", instance, path)
 		args = []string{"umount", target}
 	}
@@ -668,8 +667,8 @@ func cloneAliases(in []models.Alias) []models.Alias {
 // The wrapper uses bash -c '...' (single-quoted) for the outer layer so the
 // host shell / multipass stores it literally. Inside that:
 //   - dir is double-quoted so bash handles spaces and literal single quotes
-//   - single quotes in both dir and command are escaped with '\'' which
-//     closes the outer single-quote, inserts a literal quote, then re-opens
+//   - a single quote in dir or command closes the outer quoting, inserts
+//     an escaped literal quote, then reopens the outer quoting
 func aliasCommand(command, dir string) string {
 	if dir != "" {
 		escapedDir := strings.ReplaceAll(dir, "'", `'\''`)
