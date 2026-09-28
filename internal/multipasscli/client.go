@@ -277,13 +277,13 @@ func (c *client) RestartInstance(ctx context.Context, name string) error {
 }
 
 func (c *client) DeleteInstance(ctx context.Context, name string, purge bool) error {
-	if err := c.runSimple(ctx, "delete", name); err != nil {
-		return err
-	}
+	args := []string{"delete"}
 	if purge {
-		if err := c.runSimple(ctx, "purge"); err != nil {
-			return err
-		}
+		args = append(args, "--purge")
+	}
+	args = append(args, name)
+	if err := c.runSimple(ctx, args...); err != nil {
+		return err
 	}
 	c.invalidateInstances()
 	return nil
@@ -668,8 +668,8 @@ func cloneAliases(in []models.Alias) []models.Alias {
 // The wrapper uses bash -c '...' (single-quoted) for the outer layer so the
 // host shell / multipass stores it literally. Inside that:
 //   - dir is double-quoted so bash handles spaces and literal single quotes
-//   - single quotes in both dir and command are escaped with '\'' which
-//     closes the outer single-quote, inserts a literal quote, then re-opens
+//   - a single quote in dir or command closes the outer quoting, inserts
+//     an escaped literal quote, then reopens the outer quoting
 func aliasCommand(command, dir string) string {
 	if dir != "" {
 		escapedDir := strings.ReplaceAll(dir, "'", `'\''`)

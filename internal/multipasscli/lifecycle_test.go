@@ -1,0 +1,70 @@
+package multipasscli
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+	"time"
+)
+
+// Reuse the test executable as a portable CLI subprocess. No real VMs are touched.
+func TestMain(m *testing.M) {
+	if logPath := os.Getenv("MULTIPASS_TEST_COMMAND_LOG"); logPath != "" {
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			os.Exit(2)
+		}
+		err = json.NewEncoder(f).Encode(os.Args[1:])
+		f.Close()
+		if err != nil {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func recordingClient(t *testing.T) (*client, string) {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "commands.jsonl")
+	t.Setenv("MULTIPASS_TEST_COMMAND_LOG", logPath)
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &client{binaryPath: binary, timeout: 5 * time.Second}, logPath
+}
+
+func TestDeleteInstanceScopesPurge(t *testing.T) {
+	for _, purge := range []bool{false, true} {
+		t.Run(map[bool]string{false: "soft", true: "permanent"}[purge], func(t *testing.T) {
+			c, logPath := recordingClient(t)
+			if err := c.DeleteInstance(context.Background(), "managed-vm", purge); err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.Open(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			decoder := json.NewDecoder(f)
+			var got []string
+			if err := decoder.Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"delete", "managed-vm"}
+			if purge {
+				want = []string{"delete", "--purge", "managed-vm"}
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("command = %v, want %v", got, want)
+			}
+			if decoder.More() {
+				t.Fatal("unexpected additional command; global purge must never be used")
+			}
+		})
+	}
+}
