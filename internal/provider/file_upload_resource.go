@@ -9,8 +9,8 @@ import (
 
 	"time"
 
-	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -160,17 +160,10 @@ func (r *fileUploadResource) ModifyPlan(ctx context.Context, req resource.Modify
 		return
 	}
 
-	if plan.Source.IsUnknown() || plan.Content.IsUnknown() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("source"),
-			"Unknown file inputs",
-			"`source` or `content` must be known during planning.",
-		)
-		return
-	}
-
-	if plan.Instance.IsUnknown() || plan.Destination.IsUnknown() {
-		resp.Diagnostics.AddError("Unknown target", "`instance` and `destination` must be known during planning.")
+	if plan.Source.IsUnknown() || plan.Content.IsUnknown() || plan.Recursive.IsUnknown() {
+		// Upstream resources can supply file inputs during apply. Explicitly
+		// clear any hash copied from prior state by UseStateForUnknown.
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("content_hash"), types.StringUnknown())...)
 		return
 	}
 
