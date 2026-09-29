@@ -21,6 +21,21 @@ type Instance struct {
 	LastUpdated   time.Time
 }
 
+// InstanceResources contains daemon allocations, not guest usage statistics.
+type InstanceResources struct {
+	CPUs        int64
+	MemoryBytes uint64
+	DiskBytes   uint64
+	// Multipass currently rounds settings output even with --raw. Preserve the
+	// reported strings so callers can retain a known, more precise allocation.
+	MemoryDisplay string
+	DiskDisplay   string
+}
+
+func (r InstanceResources) EqualValues(other InstanceResources) bool {
+	return r.CPUs == other.CPUs && r.MemoryBytes == other.MemoryBytes && r.DiskBytes == other.DiskBytes
+}
+
 // Mount represents a host to instance mount binding.
 type Mount struct {
 	HostPath     string

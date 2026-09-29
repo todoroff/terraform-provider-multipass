@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
 func TestAccInstanceResource_basic(t *testing.T) {
@@ -33,7 +35,21 @@ func TestAccInstanceResource_basic(t *testing.T) {
 				ImportStateId:                        name,
 				ImportStateVerify:                    true,
 				ImportStateVerifyIdentifierAttribute: "name",
-				ImportStateVerifyIgnore:              []string{"image", "last_updated"},
+				// Import cannot recover the original size spelling; compare sizes
+				// numerically instead of ignoring their values entirely.
+				ImportStateVerifyIgnore: []string{"image", "last_updated", "memory", "disk"},
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected one imported instance")
+					}
+					for field, want := range map[string]uint64{"memory": 1 << 30, "disk": 5 << 30} {
+						got, err := multipasscli.ParseSize(states[0].Attributes[field])
+						if err != nil || got != want {
+							return fmt.Errorf("imported %s: %d, %v; want %d", field, got, err, want)
+						}
+					}
+					return nil
+				},
 			},
 		},
 	})

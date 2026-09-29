@@ -10,6 +10,7 @@
 
 - Provider configuration for CLI discovery, command timeouts, default images, and cached `multipass` metadata.
 - `multipass_instance` resource with CPU/memory/disk sizing, multiple networks, host mounts, and inline or file-based cloud-init.
+- Configurable resizing: CPU, memory, and disk growth update the existing VM by default; `resize_policy = "replace"` rebuilds it instead.
 - `multipass_snapshot` resource for managing named snapshots (create/list/delete/import).
 - `multipass_alias` resource for ergonomic host shortcuts into instances.
 - `multipass_file_upload` and `multipass_file_download` resources for Terraform-managed file transfers without provisioners.
@@ -82,6 +83,14 @@ resource "multipass_alias" "shell" {
 - `multipass_file_upload`: provision-style file or directory uploads backed by `multipass transfer`, an alternative to Terraform provisioners.
 - `multipass_file_download`: pull files or directories from Multipass instances back to the host with Terraform-managed lifecycles.
 
+## Instance resize policy
+
+`multipass_instance.resize_policy` defaults to `"in_place"`. A size change stops and resizes a running VM, then restarts it; a stopped VM remains stopped. In-place disk shrink is rejected. Removing a sizing argument keeps its current allocation.
+
+This changes the previous default of replacing the VM for every size change. Set `resize_policy = "replace"` to retain that behavior, including replacement with a smaller disk. Changing only the policy does not restart or replace the instance. Image, name, network, and cloud-init changes still force replacement.
+
+See the [instance resource documentation](docs/resources/multipass_instance.md#resizing) for downtime, failure recovery, and guest filesystem expansion details.
+
 ## Data Sources
 
 - `multipass_images`: enumerates images/blueprints from `multipass find`, with filters for name, alias, kind, and text query.
@@ -126,7 +135,7 @@ $env:TF_ACC_TERRAFORM_PATH = (Get-Command tofu).Source # or terraform
 go test ./internal/multipasscli ./internal/provider -p 1 -run '^TestAcc' -count=1 -v -timeout 30m
 ```
 
-On Linux/macOS, set the same environment variables before running the Go command. Leave `TF_ACC` unset for unit tests. The suite covers scoped VM deletion, instance replacement, cloud-init failure and retry, computed uploads, download contents and ownership, aliases, data sources, and snapshots.
+On Linux/macOS, set the same environment variables before running the Go command. Leave `TF_ACC` unset for unit tests. The suite covers scoped VM deletion, instance replacement, both resize policies and power-state preservation, cloud-init failure and retry, computed uploads, download contents and ownership, aliases, data sources, and snapshots. Run only resize acceptance tests with `go test ./internal/provider -run '^TestAccInstanceResource_resize' -count=1 -v -timeout 30m` after setting the same environment variables.
 
 ### CI & Releases
 
