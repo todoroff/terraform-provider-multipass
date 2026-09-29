@@ -44,6 +44,11 @@ type testClient struct {
 	launchInstance  func(context.Context, models.LaunchOptions) error
 	exec            func(context.Context, string, []string) error
 	getInstance     func(context.Context, string) (*models.Instance, error)
+	getResources    func(context.Context, string) (models.InstanceResources, error)
+	setResource     func(context.Context, string, multipasscli.ResourceSetting, uint64) error
+	listInstances   func(context.Context, bool) ([]models.Instance, error)
+	stopInstance    func(context.Context, string, bool) error
+	startInstance   func(context.Context, string) error
 	transferCapture func(context.Context, multipasscli.TransferOptions) ([]byte, error)
 }
 
@@ -64,4 +69,23 @@ func (c *testClient) GetInstance(ctx context.Context, name string) (*models.Inst
 
 func (c *testClient) TransferCapture(ctx context.Context, opts multipasscli.TransferOptions) ([]byte, error) {
 	return c.transferCapture(ctx, opts)
+}
+
+func (c *testClient) GetInstanceResources(ctx context.Context, name string) (models.InstanceResources, error) {
+	if c.getResources != nil {
+		return c.getResources(ctx, name)
+	}
+	return models.InstanceResources{CPUs: 1, MemoryBytes: 1 << 30, DiskBytes: 5 << 30}, nil
+}
+func (c *testClient) SetInstanceResource(ctx context.Context, name string, setting multipasscli.ResourceSetting, value uint64) error {
+	return c.setResource(ctx, name, setting, value)
+}
+func (c *testClient) ListInstances(ctx context.Context, refresh bool) ([]models.Instance, error) {
+	return c.listInstances(ctx, refresh)
+}
+func (c *testClient) StopInstance(ctx context.Context, name string, force bool) error {
+	return c.stopInstance(ctx, name, force)
+}
+func (c *testClient) StartInstance(ctx context.Context, name string) error {
+	return c.startInstance(ctx, name)
 }

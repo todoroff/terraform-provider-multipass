@@ -40,14 +40,20 @@ resource "multipass_instance" "dev" {
 
 Manages VM lifecycle. Full schema: [docs/resources/multipass_instance.md](docs/resources/multipass_instance.md)
 
-**Arguments:** `name` (required), `image`, `cpus`, `memory`, `disk`, `cloud_init_file`, `cloud_init`, `primary`, `auto_recover`, `auto_start_on_recover`, `wait_for_cloud_init`.
+**Arguments:** `name` (required), `image`, `cpus`, `memory`, `disk`, `resize_policy`, `cloud_init_file`, `cloud_init`, `primary`, `auto_recover`, `auto_start_on_recover`, `wait_for_cloud_init`.
 **Nested blocks:** `networks` (name, mode, mac), `mounts` (host_path, instance_path, read_only), `timeouts`.
 **Computed:** `id`, `ipv4`, `state`, `release`, `image_release`, `snapshot_count`, `last_updated`.
 
 Key behaviors:
-- `cpus`, `memory`, `disk`, `image`, `cloud_init`, `cloud_init_file`, `networks` changes **force recreation**.
+- `resize_policy = "in_place"` (default) resizes CPU/memory and grows disk on the existing VM, gracefully stopping and restarting it only if it was running. Already stopped VMs remain stopped; suspended or transitional VMs must first be started or stopped.
+- `resize_policy = "replace"` retains the previous behavior of replacing the VM when CPU/memory/disk allocations change, including disk shrink. Changing only the policy does not restart or replace the VM.
+- In-place disk shrink is rejected during apply before any mutation. Resizing never silently falls back to replacement.
+- Omitting or removing `cpus`, `memory`, or `disk` retains existing allocations. New instances default to 1 CPU, 1G memory, and 5G disk. Refresh/import read daemon allocations; equivalent size spellings do not trigger a resize or replacement.
+- Multipass rounds size settings even with `get --raw`. Preserve known configured sizes that match its rounded report; imported/newly discovered values are estimates, and external changes inside the same rounding interval are not detectable.
+- `name`, `image`, `cloud_init`, `cloud_init_file`, `networks` changes **force recreation**, regardless of resize policy.
 - `cloud_init` and `cloud_init_file` are **mutually exclusive**.
-- `memory` and `disk` accept Multipass size strings: `"512M"`, `"4G"`, `"1T"`.
+- `memory` and `disk` accept positive byte counts or binary size strings such as `"512M"`, `"4G"`, `"1T"`, and `"1.5GiB"`, with overflow validation. Guest filesystem expansion can require a separate step after disk growth.
+- Resize failures retain confirmed allocation changes and report the original error. Recovery attempts to restart an originally running, confirmed-stopped VM and read allocations within 60 additional seconds, respecting request cancellation. Use `timeouts.update` to control the normal resize deadline.
 - `mounts` can be added/removed **in place** without recreation.
 - Import by instance name: `terraform import multipass_instance.dev dev-box`
 

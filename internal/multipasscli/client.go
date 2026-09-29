@@ -24,6 +24,8 @@ type Client interface {
 	Version(ctx context.Context) (string, error)
 	ListInstances(ctx context.Context, refresh bool) ([]models.Instance, error)
 	GetInstance(ctx context.Context, name string) (*models.Instance, error)
+	GetInstanceResources(ctx context.Context, name string) (models.InstanceResources, error)
+	SetInstanceResource(ctx context.Context, name string, setting ResourceSetting, value uint64) error
 	LaunchInstance(ctx context.Context, opts models.LaunchOptions) error
 	Exec(ctx context.Context, instance string, command []string) error
 	StartInstance(ctx context.Context, name string) error

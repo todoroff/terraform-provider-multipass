@@ -3,9 +3,11 @@ package multipasscli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +25,22 @@ func TestMain(m *testing.M) {
 		f.Close()
 		if err != nil {
 			os.Exit(2)
+		}
+		var responses map[string]struct {
+			Stdout   string
+			Stderr   string
+			ExitCode int
+		}
+		if raw := os.Getenv("MULTIPASS_TEST_RESPONSES"); raw != "" {
+			if json.Unmarshal([]byte(raw), &responses) != nil {
+				os.Exit(2)
+			}
+		}
+		response := responses[strings.Join(os.Args[1:], " ")]
+		fmt.Fprint(os.Stdout, response.Stdout)
+		fmt.Fprint(os.Stderr, response.Stderr)
+		if response.ExitCode != 0 {
+			os.Exit(response.ExitCode)
 		}
 		os.Exit(0)
 	}

@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/boolvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	stringvalidator "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -18,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -32,6 +34,7 @@ var (
 	_ resource.Resource                = (*instanceResource)(nil)
 	_ resource.ResourceWithConfigure   = (*instanceResource)(nil)
 	_ resource.ResourceWithImportState = (*instanceResource)(nil)
+	_ resource.ResourceWithModifyPlan  = (*instanceResource)(nil)
 )
 
 // NewInstanceResource registers the resource with the provider.
@@ -73,33 +76,44 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			},
 			"cpus": schema.Int64Attribute{
 				Optional:            true,
-				Description:         "Number of virtual CPUs. Changing this value forces recreation.",
-				MarkdownDescription: "Number of virtual CPUs. Changing this value forces recreation.",
+				Computed:            true,
+				Description:         "Virtual CPU count. Defaults to 1 at creation; omission retains the existing allocation. Changes follow resize_policy.",
+				MarkdownDescription: "Virtual CPU count. Defaults to 1 at creation; omission retains the existing allocation. Changes follow `resize_policy`.",
 				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.RequiresReplace(),
+					int64planmodifier.UseNonNullStateForUnknown(),
 				},
+				Validators: []validator.Int64{int64validator.AtLeast(1)},
 			},
 			"memory": schema.StringAttribute{
 				Optional:            true,
-				Description:         "Memory size (e.g., `1G`, `512M`). Changing forces recreation.",
-				MarkdownDescription: "Memory size (e.g., `1G`, `512M`). Changing forces recreation.",
+				Computed:            true,
+				Description:         "Memory size (e.g., 1G, 512M, or bytes). Defaults to 1G at creation; omission retains the allocation. Changes follow resize_policy.",
+				MarkdownDescription: "Memory size (e.g., `1G`, `512M`, or bytes). Defaults to `1G` at creation; omission retains the allocation. Changes follow `resize_policy`.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseNonNullStateForUnknown(),
 				},
 				Validators: []validator.String{
-					stringvalidator.RegexMatches(memoryRegex, "must follow Multipass size notation, e.g. 1G or 512M"),
+					allocationSizeValidator{},
 				},
 			},
 			"disk": schema.StringAttribute{
 				Optional:            true,
-				Description:         "Disk size (e.g., `5G`). Changing forces recreation.",
-				MarkdownDescription: "Disk size (e.g., `5G`). Changing forces recreation.",
+				Computed:            true,
+				Description:         "Disk allocation (e.g., 5G or bytes). Defaults to 5G at creation; omission retains the allocation. In-place resizing only permits growth.",
+				MarkdownDescription: "Disk allocation (e.g., `5G` or bytes). Defaults to `5G` at creation; omission retains the allocation. In-place resizing only permits growth.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseNonNullStateForUnknown(),
 				},
 				Validators: []validator.String{
-					stringvalidator.RegexMatches(memoryRegex, "must follow Multipass size notation, e.g. 5G"),
+					allocationSizeValidator{},
 				},
+			},
+			"resize_policy": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("in_place"),
+				Description: "How CPU, memory, and disk changes are applied: in_place (default) stops and resizes the VM, restarting it only if previously running; replace recreates it. Changing only this policy does not restart or replace the VM.",
+				Validators:  []validator.String{stringvalidator.OneOf("in_place", "replace")},
 			},
 			"cloud_init_file": schema.StringAttribute{
 				Optional:            true,
@@ -259,17 +273,32 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	launchMemory := valueOrDefaultString(plan.Memory, "1G")
+	launchDisk := valueOrDefaultString(plan.Disk, "5G")
+	memoryBytes, err := multipasscli.ParseSize(launchMemory)
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("memory"), "Invalid allocation size", err.Error())
+		return
+	}
+	diskBytes, err := multipasscli.ParseSize(launchDisk)
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("disk"), "Invalid allocation size", err.Error())
+		return
+	}
 	opts := models.LaunchOptions{
 		Name:            plan.Name.ValueString(),
 		Image:           r.resolveImage(plan.Image),
 		CPUs:            valueOrDefaultInt(plan.CPUs, 1),
-		Memory:          valueOrDefaultString(plan.Memory, "1G"),
-		Disk:            valueOrDefaultString(plan.Disk, "5G"),
+		Memory:          strconv.FormatUint(memoryBytes, 10),
+		Disk:            strconv.FormatUint(diskBytes, 10),
 		CloudInitFile:   valueOrEmpty(plan.CloudInitFile),
 		CloudInitInline: valueOrEmpty(plan.CloudInit),
 		Networks:        expandNetworkAttachments(plan.Networks),
 		Mounts:          expandMounts(plan.Mounts),
 		Primary:         plan.Primary.ValueBool(),
+	}
+	if plan.ResizePolicy.IsNull() || plan.ResizePolicy.IsUnknown() {
+		plan.ResizePolicy = types.StringValue("in_place")
 	}
 
 	// Use a dedicated context for the launch so the original ctx stays
@@ -311,6 +340,23 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		)
 	}
 
+	// Launch succeeded: persist the VM even if allocation readback or cloud-init
+	// subsequently fails. Resolve computed launch defaults and initialize remote
+	// metadata so a failed refresh cannot leave unknown values in saved state.
+	plan.ID = types.StringValue(opts.Name)
+	plan.CPUs = types.Int64Value(int64(opts.CPUs))
+	plan.Memory = types.StringValue(launchMemory)
+	plan.Disk = types.StringValue(launchDisk)
+	plan.State = types.StringNull()
+	plan.Release = types.StringNull()
+	plan.ImageRelease = types.StringNull()
+	plan.SnapshotCount = types.Int64Null()
+	plan.LastUpdated = types.StringNull()
+	plan.IPv4 = types.ListNull(types.StringType)
+	defer func() {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	}()
+
 	if plan.WaitForCloudInit.ValueBool() {
 		tflog.Info(ctx, "Waiting for cloud-init to finish", map[string]any{"name": opts.Name})
 		if err := r.waitForCloudInit(createCtx, opts.Name); err != nil {
@@ -318,9 +364,6 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 			// Terraform can clean up or replace the failed creation, while
 			// preventing dependent resources from running.
 			resp.Diagnostics.Append(r.refreshState(ctx, opts.Name, &plan)...)
-			if !resp.Diagnostics.HasError() {
-				resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-			}
 			resp.Diagnostics.AddError("cloud-init wait failed", err.Error())
 			return
 		}
@@ -334,10 +377,6 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 
 	refreshDiags := r.refreshState(ctx, opts.Name, &plan)
 	resp.Diagnostics.Append(refreshDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -430,6 +469,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// Ensure id is always set — important after import where only name is populated.
 	state.ID = types.StringValue(name)
 	resp.Diagnostics.Append(applyInstanceToModel(ctx, instance, &state)...)
+	resp.Diagnostics.Append(r.refreshAllocations(ctx, name, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -464,6 +504,7 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	requestCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
 	defer cancel()
 
@@ -476,11 +517,24 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	// Keep confirmed allocations even when a subsequent primary or mount update
+	// fails. Never persist the whole plan on an unsuccessful update.
+	defer func() {
+		if resp.Diagnostics.HasError() {
+			resp.Diagnostics.Append(resp.State.Set(requestCtx, &state)...)
+		}
+	}()
+	resp.Diagnostics.Append(r.resizeInstance(requestCtx, ctx, &plan, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	if plan.Primary.ValueBool() && !state.Primary.ValueBool() {
 		if err := r.client.SetPrimary(ctx, plan.Name.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to set primary", err.Error())
 			return
 		}
+		state.Primary = plan.Primary
 	}
 
 	toAdd, toRemove := diffMounts(plan.Mounts, state.Mounts)
@@ -499,6 +553,7 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 				return
 			}
 		}
+		state.Mounts = plan.Mounts
 	}
 
 	refreshDiags := r.refreshState(ctx, plan.Name.ValueString(), &plan)
@@ -567,6 +622,7 @@ func (r *instanceResource) refreshState(ctx context.Context, name string, model 
 	model.ID = types.StringValue(name)
 	model.Name = types.StringValue(name)
 	diags.Append(applyInstanceToModel(ctx, instance, model)...)
+	diags.Append(r.refreshAllocations(ctx, name, model)...)
 	return diags
 }
 
@@ -606,8 +662,6 @@ func applyInstanceToModel(ctx context.Context, instance *models.Instance, model 
 
 // Helpers
 
-var memoryRegex = regexp.MustCompile(`^[0-9]+(K|M|G|T)$`)
-
 type networkConfigModel struct {
 	Name types.String `tfsdk:"name"`
 	Mode types.String `tfsdk:"mode"`
@@ -627,6 +681,7 @@ type instanceResourceModel struct {
 	CPUs               types.Int64          `tfsdk:"cpus"`
 	Memory             types.String         `tfsdk:"memory"`
 	Disk               types.String         `tfsdk:"disk"`
+	ResizePolicy       types.String         `tfsdk:"resize_policy"`
 	CloudInitFile      types.String         `tfsdk:"cloud_init_file"`
 	CloudInit          types.String         `tfsdk:"cloud_init"`
 	Primary            types.Bool           `tfsdk:"primary"`
