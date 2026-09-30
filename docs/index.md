@@ -4,6 +4,8 @@ The Multipass provider lets you manage Canonical Multipass instances, aliases, a
 
 ## Example Usage
 
+For Pulumi, see the [Pulumi guide](guides/pulumi.md) and [TypeScript/Python examples](../examples/pulumi/).
+
 ```hcl
 terraform {
   required_providers {

@@ -1,0 +1,55 @@
+name: Pulumi compatibility
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'examples/pulumi/**'
+      - 'tests/pulumi/**'
+      - '.github/workflows/pulumi.yml'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'examples/pulumi/**'
+      - 'tests/pulumi/**'
+      - '.github/workflows/pulumi.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bridge:
+    name: Schema, SDKs, and previews (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: pulumi/actions@v6
+        with:
+          pulumi-version: '3.266.0'
+      - name: Check the local provider through the real Pulumi bridge
+        env:
+          PULUMI_TEST: '1'
+        run: go test ./tests/pulumi -count=1 -v -timeout 15m

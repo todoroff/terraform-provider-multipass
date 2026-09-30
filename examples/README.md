@@ -30,5 +30,8 @@ Provisioner-style workflow using the native `multipass_file_upload` and `multipa
 - Downloads those same artifacts back onto the host, showcasing directory recursion and `triggers`.
 - Ideal starting point if you're replacing Terraform's `file` provisioner (or `null_resource` download hacks).
 
-Each subdirectory contains a `main.tf` (and supporting files where needed). Run `terraform init` (or `tofu init`) inside any example directory and the published provider will be installed automatically.
+Each Terraform scenario above contains a `main.tf` (and supporting files where needed). Run `terraform init` (or `tofu init`) inside its directory and the published provider will be installed automatically.
 
+## 6. `pulumi/`
+
+[TypeScript and Python examples](pulumi/) use Pulumi's Terraform bridge with pinned provider versions. They demonstrate VM creation, cloud-init, optional mounts/networks, an alias, an output-dependent upload, and image queries. Run `pulumi install` inside the language directory. See the [Pulumi guide](../docs/guides/pulumi.md) for setup and lifecycle details.

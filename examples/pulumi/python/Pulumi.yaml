@@ -1,0 +1,13 @@
+name: multipass-python
+description: A Multipass VM, shell alias, and file upload using the Terraform bridge.
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+packages:
+  multipass:
+    source: terraform-provider
+    version: 1.4.0
+    parameters:
+      - registry.terraform.io/todoroff/multipass
+      - 2.0.0

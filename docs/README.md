@@ -4,6 +4,8 @@ The Multipass provider lets you manage Canonical Multipass instances, aliases, a
 
 ## Configuration
 
+Pulumi users can use the [Terraform bridge guide](guides/pulumi.md) and [TypeScript/Python examples](../examples/pulumi/).
+
 ```hcl
 provider "multipass" {
   multipass_path  = "/usr/bin/multipass" # optional
@@ -34,4 +36,3 @@ Ready-made Terraform configurations live under `examples/`. Start with `basic/`,
 Each scenario contains inline comments explaining how to run it; simply run `terraform init` within the example directory to pull the published provider.
 
 Refer to the README for development instructions and examples.
-

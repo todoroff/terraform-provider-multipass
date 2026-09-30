@@ -15,6 +15,14 @@ vendor/
 .terraform.lock.hcl
 examples/file-provisioner/downloads/
 
+# Pulumi examples: generated SDKs, dependencies, and local stack state
+examples/pulumi/**/sdks/
+examples/pulumi/**/node_modules/
+examples/pulumi/**/venv/
+examples/pulumi/**/__pycache__/
+examples/pulumi/**/.pulumi/
+examples/pulumi/**/Pulumi.*.yaml
+
 # Editor/OS noise
 .DS_Store
 .vscode/
@@ -23,4 +31,3 @@ examples/file-provisioner/downloads/
 
 # Logs
 *.log
-
