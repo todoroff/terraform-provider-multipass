@@ -1,4 +1,9 @@
-# Data Source: multipass_networks
+---
+page_title: "multipass_networks Data Source - multipass"
+description: "List host networks available for Multipass bridged networking."
+---
+
+# multipass_networks (Data Source)
 
 Lists host networks available for Multipass bridged networking.
 
@@ -27,5 +32,4 @@ output "network_names" {
 | `name`       | Host network display name. |
 | `type`       | Network type (e.g., `ethernet`, `wifi`). |
 | `description`| Human-readable description from Multipass. |
-
 

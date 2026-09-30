@@ -8,18 +8,18 @@ Provider configuration accepts: `multipass_path` (default: `"multipass"` from PA
 
 ## Resources
 
-- [multipass_instance](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_instance.md): Manages VM lifecycle, sizing (cpus/memory/disk), cloud-init, networks, and host mounts. Changes to cpus, memory, disk, image, cloud_init, and networks force recreation. Mounts can be updated in place.
-- [multipass_alias](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_alias.md): Creates host-side command aliases that execute inside an instance. Supports working_directory for automatic `cd` wrapping.
-- [multipass_snapshot](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_snapshot.md): Manages named snapshots. Instance must be stopped. ID format: `<instance>.<snapshot>`.
-- [multipass_file_upload](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_file_upload.md): Transfers local files or inline content into instances. Exactly one of `source` or `content` required. Updates via SHA256 content_hash drift detection.
-- [multipass_file_download](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/multipass_file_download.md): Copies files from instances to the host. Use `triggers` map to force re-download. Cannot be imported.
+- [multipass_instance](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/instance.md): Manages VM lifecycle, sizing (cpus/memory/disk), cloud-init, networks, and host mounts. CPU/memory changes and disk growth update in place by default; `resize_policy = "replace"` recreates the VM for allocation changes. Name, image, cloud-init, and network changes force recreation. Mounts can be updated in place.
+- [multipass_alias](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/alias.md): Creates host-side command aliases that execute inside an instance. Supports working_directory for automatic `cd` wrapping.
+- [multipass_snapshot](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/snapshot.md): Manages named snapshots. Instance must be stopped. ID format: `<instance>.<snapshot>`.
+- [multipass_file_upload](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/file_upload.md): Transfers local files or inline content into instances. Exactly one of `source` or `content` required. Updates via SHA256 content_hash drift detection.
+- [multipass_file_download](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/resources/file_download.md): Copies files from instances to the host. Use `triggers` map to force re-download. Cannot be imported.
 
 ## Data Sources
 
-- [multipass_images](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_images.md): Lists launchable images and blueprints. Filterable by name, alias, kind, or substring query.
-- [multipass_networks](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_networks.md): Lists host networks available for bridged networking.
-- [multipass_instance](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_instance.md): Read-only inspection of an existing instance (state, IPs, CPU, memory, disk usage).
-- [multipass_snapshots](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/multipass_snapshots.md): Lists snapshots for a given instance. Filterable by name.
+- [multipass_images](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/images.md): Lists launchable images and blueprints. Filterable by name, alias, kind, or substring query.
+- [multipass_networks](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/networks.md): Lists host networks available for bridged networking.
+- [multipass_instance](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/instance.md): Read-only inspection of an existing instance (state, IPs, CPU, memory, disk usage).
+- [multipass_snapshots](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/data-sources/snapshots.md): Lists snapshots for a given instance. Filterable by name.
 
 ## Examples
 

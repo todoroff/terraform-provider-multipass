@@ -1,4 +1,9 @@
-# Resource: multipass_snapshot
+---
+page_title: "multipass_snapshot Resource - multipass"
+description: "Manage a named snapshot of a stopped Multipass instance."
+---
+
+# multipass_snapshot (Resource)
 
 Manages a named snapshot for a Multipass instance.
 
@@ -36,5 +41,4 @@ An existing snapshot can be imported by the `instance.snapshot` identifier:
 ```bash
 terraform import multipass_snapshot.db_snapshot lab-db.pre-upgrade
 ```
-
 

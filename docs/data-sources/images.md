@@ -1,4 +1,9 @@
-# Data Source: multipass_images
+---
+page_title: "multipass_images Data Source - multipass"
+description: "List and filter launchable Multipass images and blueprints."
+---
+
+# multipass_images (Data Source)
 
 Returns the list of images and blueprints reported by `multipass find`.
 
@@ -39,5 +44,4 @@ All arguments are optional and can be combined.
 | `version`     | Image version tag. |
 | `description` | Same as release for images; blueprint descriptions otherwise. |
 | `kind`        | `image` or `blueprint`. |
-
 

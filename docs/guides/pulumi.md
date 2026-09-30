@@ -1,3 +1,8 @@
+---
+page_title: "Using Multipass with Pulumi"
+description: "Use the Multipass provider through Pulumi's Terraform bridge."
+---
+
 # Using Multipass with Pulumi
 
 Use this provider through Pulumi's [Any Terraform Provider](https://www.pulumi.com/docs/iac/concepts/providers/any-terraform-provider/) bridge. It wraps the published `todoroff/multipass` binary and generates a local SDK for your language. The same Multipass CLI implementation serves Terraform, OpenTofu, and Pulumi.
@@ -121,7 +126,7 @@ In Python, use `InstanceNetworkArgs`, `InstanceMountArgs`, and `InstanceTimeouts
 ## Lifecycle details
 
 - **Replacement ordering:** use [`deleteBeforeReplace: true`](https://www.pulumi.com/docs/iac/concepts/resources/options/deletebeforereplace/) (`delete_before_replace=True` in Python) for VMs and named snapshots that retain the same physical name during replacement. A second resource with that name cannot coexist with the first. Use it for file downloads that replace into the same local destination as well, so deleting the old resource cannot remove the new download. Replacement deletes the existing resource and may cause downtime.
-- **Resize policy:** `resizePolicy: "in_place"` / `resize_policy="in_place"` is the default. The literal is `in_place`, including the underscore. CPU and memory changes and disk growth update the VM; shrinking a disk fails before mutation. `"replace"` requests recreation for allocation changes. See the [instance resizing guide](../resources/multipass_instance.md#resizing).
+- **Resize policy:** `resizePolicy: "in_place"` / `resize_policy="in_place"` is the default. The literal is `in_place`, including the underscore. CPU and memory changes and disk growth update the VM; shrinking a disk fails before mutation. `"replace"` requests recreation for allocation changes. See the [instance resizing guide](../resources/instance.md#resizing).
 - **Cloud-init:** `cloudInit` and `cloudInitFile` are mutually exclusive and force replacement when changed. Set `waitForCloudInit` when uploads or other resources depend on provisioning. A reference to `vm.name` then orders them after creation finishes.
 - **Timeouts:** provider `commandTimeout` and resource `timeouts` control CLI operations. Pulumi's `customTimeouts` controls the outer resource operation. Allow time for recovery: launch can poll for up to five additional minutes, and resize recovery can use up to 60 additional seconds.
 - **Files and secrets:** `source` takes a local path, not a Pulumi `FileAsset`; `content` takes a string or Output. Inline cloud-init and upload content carry secret annotations in the generated schema. Use `config.requireSecret()` / `config.require_secret()` for secret configuration values. Removing a file upload deletes its remote destination; removing a download deletes its owned local path.

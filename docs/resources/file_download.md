@@ -1,3 +1,8 @@
+---
+page_title: "multipass_file_download Resource - multipass"
+description: "Download files or directories from a Multipass instance to the host."
+---
+
 # multipass_file_download (Resource)
 
 Copies files or directories **from** a Multipass instance back to the host using `multipass transfer`, providing a Terraform-native alternative to ad-hoc `null_resource` download provisioners.

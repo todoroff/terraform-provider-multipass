@@ -1,4 +1,9 @@
-# Resource: multipass_instance
+---
+page_title: "multipass_instance Resource - multipass"
+description: "Manage the lifecycle, allocations, networks, and mounts of a Multipass instance."
+---
+
+# multipass_instance (Resource)
 
 Manages the lifecycle of a Canonical Multipass instance via the Multipass CLI. The resource launches instances, tracks their status, and optionally designates an instance as primary.
 

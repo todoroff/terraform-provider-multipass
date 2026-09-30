@@ -18,12 +18,16 @@ provider "multipass" {
 
 - [`multipass_instance`](resources/instance.md) – manage VM lifecycle, networks, mounts, and metadata.
 - [`multipass_alias`](resources/alias.md) – expose commands from instances as host aliases.
+- [`multipass_snapshot`](resources/snapshot.md) – manage named snapshots for stopped instances.
+- [`multipass_file_upload`](resources/file_upload.md) – upload files, directories, or inline content.
+- [`multipass_file_download`](resources/file_download.md) – download files or directories to the host.
 
 ## Data Sources
 
 - [`multipass_images`](data-sources/images.md) – enumerate launchable images/blueprints.
 - [`multipass_networks`](data-sources/networks.md) – list host bridge targets.
 - [`multipass_instance`](data-sources/instance.md) – inspect existing Multipass instances.
+- [`multipass_snapshots`](data-sources/snapshots.md) – list snapshots for an instance.
 
 ## Examples
 

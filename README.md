@@ -101,7 +101,7 @@ Start with the [TypeScript or Python examples](examples/pulumi/). The [Pulumi gu
 
 This changes the previous default of replacing the VM for every size change. Set `resize_policy = "replace"` to retain that behavior, including replacement with a smaller disk. Changing only the policy does not restart or replace the instance. Image, name, network, and cloud-init changes still force replacement.
 
-See the [instance resource documentation](docs/resources/multipass_instance.md#resizing) for downtime, failure recovery, and guest filesystem expansion details.
+See the [instance resource documentation](docs/resources/instance.md#resizing) for downtime, failure recovery, and guest filesystem expansion details.
 
 ## Data Sources
 
@@ -149,9 +149,26 @@ go test ./internal/multipasscli ./internal/provider -p 1 -run '^TestAcc' -count=
 
 On Linux/macOS, set the same environment variables before running the Go command. Leave `TF_ACC` unset for unit tests. The suite covers scoped VM deletion, instance replacement, both resize policies and power-state preservation, cloud-init failure and retry, computed uploads, download contents and ownership, aliases, data sources, and snapshots. Run only resize acceptance tests with `go test ./internal/provider -run '^TestAccInstanceResource_resize' -count=1 -v -timeout 30m` after setting the same environment variables.
 
+### Documentation
+
+Documentation is maintained by hand under `docs/`. Resource and data-source filenames omit the `multipass_` prefix. Registry pages include YAML frontmatter, and guides set `page_title`. Keep links in the READMEs, `AGENTS.md`, and `llms.txt` aligned when renaming pages.
+
+Run the same validation used by CI with PowerShell and Go, plus Terraform or OpenTofu on PATH:
+
+```powershell
+./scripts/validate-docs.ps1
+# To use OpenTofu instead:
+./scripts/validate-docs.ps1 -TerraformPath tofu
+```
+
+On Linux/macOS, invoke it with `pwsh -File scripts/validate-docs.ps1`. The script checks local Markdown links, builds the provider from `cmd/`, exports its schema, and runs pinned `tfplugindocs` 0.25.0 validation. That tool requires Go 1.25.8 or newer; Go can download the required toolchain automatically. It needs no Multipass daemon and does not create VMs. Temporary CLI settings and files are isolated under `build/` and cleaned up afterward.
+
+Reference page paths now use names such as `docs/resources/instance.md` and `docs/data-sources/instance.md`. Existing release documentation keeps its previous paths; update links to `latest` when the next release publishes these renamed pages. Use the [Registry preview tool](https://registry.terraform.io/tools/doc-preview) to review rendering before a release.
+
 ### CI & Releases
 
 - CI runs on GitHub Actions (`.github/workflows/ci.yml`) and executes `go test ./...` across a small matrix of Go versions and OSes.
+- Documentation validation runs in `.github/workflows/docs.yml` on Linux and Windows, including documentation-only changes.
 - Pulumi compatibility runs separately in `.github/workflows/pulumi.yml`: schema checks, SDK generation, TypeScript checking, and previews with a fake Multipass CLI on Linux and Windows. See [how to run it locally](docs/guides/pulumi.md#compatibility-checks).
 - Tagged releases (`X.Y.Z`) trigger GoReleaser (`.goreleaser.yml`) via `.github/workflows/release.yml`, which builds cross-platform artifacts suitable for attaching to GitHub Releases and publishing to the Terraform/OpenTofu registries.
 

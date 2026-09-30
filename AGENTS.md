@@ -38,7 +38,7 @@ resource "multipass_instance" "dev" {
 
 ### multipass_instance
 
-Manages VM lifecycle. Full schema: [docs/resources/multipass_instance.md](docs/resources/multipass_instance.md)
+Manages VM lifecycle. Full schema: [docs/resources/instance.md](docs/resources/instance.md)
 
 **Arguments:** `name` (required), `image`, `cpus`, `memory`, `disk`, `resize_policy`, `cloud_init_file`, `cloud_init`, `primary`, `auto_recover`, `auto_start_on_recover`, `wait_for_cloud_init`.
 **Nested blocks:** `networks` (name, mode, mac), `mounts` (host_path, instance_path, read_only), `timeouts`.
@@ -98,7 +98,7 @@ resource "multipass_instance" "runner" {
 
 ### multipass_alias
 
-Host-side command alias for an instance. Full schema: [docs/resources/multipass_alias.md](docs/resources/multipass_alias.md)
+Host-side command alias for an instance. Full schema: [docs/resources/alias.md](docs/resources/alias.md)
 
 **Arguments:** `name` (required, recreate on change), `instance` (required), `command` (required), `working_directory` (optional, wraps command with `cd`).
 
@@ -115,7 +115,7 @@ Import: `terraform import multipass_alias.shell app-shell`
 
 ### multipass_snapshot
 
-Named snapshot of a stopped instance. Full schema: [docs/resources/multipass_snapshot.md](docs/resources/multipass_snapshot.md)
+Named snapshot of a stopped instance. Full schema: [docs/resources/snapshot.md](docs/resources/snapshot.md)
 
 **Arguments:** `instance` (required), `name` (optional, auto-generated if omitted), `comment` (optional). Both `name` and `comment` force recreation.
 **Computed:** `id` as `<instance>.<snapshot>`.
@@ -134,7 +134,7 @@ Import: `terraform import multipass_snapshot.backup my-app.pre-upgrade`
 
 ### multipass_file_upload
 
-Transfer files or inline content into an instance. Full schema: [docs/resources/multipass_file_upload.md](docs/resources/multipass_file_upload.md)
+Transfer files or inline content into an instance. Full schema: [docs/resources/file_upload.md](docs/resources/file_upload.md)
 
 **Arguments:** `instance` (required), `destination` (required), `source` or `content` (exactly one required), `recursive`, `create_parents`.
 **Computed:** `content_hash` (SHA256, drives update detection).
@@ -161,7 +161,7 @@ Import: `terraform import multipass_file_upload.config my-app:/home/ubuntu/app.c
 
 ### multipass_file_download
 
-Copy files from an instance to the host. Full schema: [docs/resources/multipass_file_download.md](docs/resources/multipass_file_download.md)
+Copy files from an instance to the host. Full schema: [docs/resources/file_download.md](docs/resources/file_download.md)
 
 **Arguments:** `instance`, `source`, `destination` (all required, all force recreation), `recursive`, `create_parents`, `overwrite`, `triggers` (map, forces re-download on change).
 **Computed:** `content_hash`.
@@ -185,7 +185,7 @@ resource "multipass_file_download" "logs" {
 
 ### multipass_images
 
-Enumerate launchable images/blueprints. Full schema: [docs/data-sources/multipass_images.md](docs/data-sources/multipass_images.md)
+Enumerate launchable images/blueprints. Full schema: [docs/data-sources/images.md](docs/data-sources/images.md)
 
 **Filters (all optional, combinable):** `name` (exact), `alias`, `kind` (`"image"` / `"blueprint"`), `query` (substring).
 **Returns:** list `images` with `name`, `aliases`, `os`, `release`, `remote`, `version`, `description`, `kind`.
@@ -199,7 +199,7 @@ data "multipass_images" "lts" {
 
 ### multipass_networks
 
-List host networks for bridged networking. Full schema: [docs/data-sources/multipass_networks.md](docs/data-sources/multipass_networks.md)
+List host networks for bridged networking. Full schema: [docs/data-sources/networks.md](docs/data-sources/networks.md)
 
 **Filter:** `name` (optional, exact).
 **Returns:** list `networks` with `name`, `type`, `description`.
@@ -210,7 +210,7 @@ data "multipass_networks" "all" {}
 
 ### multipass_instance (data source)
 
-Read-only inspection of an existing instance. Full schema: [docs/data-sources/multipass_instance.md](docs/data-sources/multipass_instance.md)
+Read-only inspection of an existing instance. Full schema: [docs/data-sources/instance.md](docs/data-sources/instance.md)
 
 **Required:** `name`.
 **Returns:** `state`, `release`, `image_release`, `ipv4`, `cpu_count`, `memory_total_bytes`, `memory_used_bytes`, `disk_total_bytes`, `disk_used_bytes`, `snapshot_count`, `last_updated`.
@@ -223,7 +223,7 @@ data "multipass_instance" "vm" {
 
 ### multipass_snapshots
 
-List snapshots for an instance. Full schema: [docs/data-sources/multipass_snapshots.md](docs/data-sources/multipass_snapshots.md)
+List snapshots for an instance. Full schema: [docs/data-sources/snapshots.md](docs/data-sources/snapshots.md)
 
 **Required:** `instance`. **Optional:** `name` (exact filter).
 **Returns:** list `snapshots` with `instance`, `name`, `comment`, `parent`.

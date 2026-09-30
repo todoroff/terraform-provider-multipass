@@ -1,4 +1,9 @@
-# Data Source: multipass_instance
+---
+page_title: "multipass_instance Data Source - multipass"
+description: "Inspect an existing Multipass instance without managing its lifecycle."
+---
+
+# multipass_instance (Data Source)
 
 Returns information about an existing Multipass instance without managing it.
 
@@ -35,5 +40,4 @@ output "primary_state" {
 | `disk_used_bytes`    | Used disk bytes. |
 | `snapshot_count`     | Number of snapshots recorded. |
 | `last_updated`       | RFC3339 timestamp of the last refresh. |
-
 

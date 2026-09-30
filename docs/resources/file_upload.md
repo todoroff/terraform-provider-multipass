@@ -1,3 +1,8 @@
+---
+page_title: "multipass_file_upload Resource - multipass"
+description: "Upload local files, directories, or inline content to a Multipass instance."
+---
+
 # multipass_file_upload (Resource)
 
 Transfers local files, inline content, or entire directories into a Multipass instance—mirroring Terraform's built-in [`file` provisioner](https://developer.hashicorp.com/terraform/language/provisioners)—by shelling out to `multipass transfer`.
@@ -60,4 +65,3 @@ Exactly one of `source` or `content` must be provided.
 * Updates re-run `multipass transfer` whenever `content_hash` changes, mirroring how Terraform provisioners behave during apply.
 * When using `content`, data never touches disk outside of a short-lived temp file that is deleted after the transfer.
 * Destroying the resource removes the remote path via `multipass exec <instance> rm -rf -- <destination>`. Use caution when pointing `destination` at directories shared with other resources.
-

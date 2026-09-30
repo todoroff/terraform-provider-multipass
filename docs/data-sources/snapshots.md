@@ -1,4 +1,9 @@
-# Data Source: multipass_snapshots
+---
+page_title: "multipass_snapshots Data Source - multipass"
+description: "List and filter snapshots belonging to a Multipass instance."
+---
+
+# multipass_snapshots (Data Source)
 
 Returns snapshots for a given Multipass instance.
 
@@ -40,5 +45,4 @@ data "multipass_snapshots" "pre_upgrade" {
 | `name`    | Snapshot name. |
 | `comment` | Snapshot comment, if any. |
 | `parent`  | Parent snapshot, if reported by Multipass. |
-
 

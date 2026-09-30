@@ -1,3 +1,8 @@
+---
+page_title: "Multipass Provider"
+description: "Manage Canonical Multipass virtual machines and supporting resources through the Multipass CLI."
+---
+
 # Multipass Provider
 
 The Multipass provider lets you manage Canonical Multipass instances, aliases, and supporting metadata using Terraform. It shells out to the `multipass` CLI and therefore requires Multipass to be installed and available on the host where Terraform runs.
@@ -32,14 +37,15 @@ The following arguments are supported in the `provider "multipass"` block:
 
 ## Resources
 
-- `multipass_instance` – Manage VM lifecycle, networks, mounts, and metadata.
-- `multipass_alias` – Expose commands from instances as host aliases.
-- `multipass_snapshot` – Manage named snapshots for stopped instances.
-- `multipass_file_upload` – Provision files or directories into instances using `multipass transfer`.
-- `multipass_file_download` – Pull files or directories from instances onto the host.
+- [`multipass_instance`](resources/instance.md) – Manage VM lifecycle, networks, mounts, and metadata.
+- [`multipass_alias`](resources/alias.md) – Expose commands from instances as host aliases.
+- [`multipass_snapshot`](resources/snapshot.md) – Manage named snapshots for stopped instances.
+- [`multipass_file_upload`](resources/file_upload.md) – Provision files or directories into instances using `multipass transfer`.
+- [`multipass_file_download`](resources/file_download.md) – Pull files or directories from instances onto the host.
 
 ## Data Sources
 
-- `multipass_images` – Enumerate launchable images/blueprints.
-- `multipass_networks` – List host bridge targets.
-- `multipass_instance` – Inspect existing Multipass instances.
+- [`multipass_images`](data-sources/images.md) – Enumerate launchable images/blueprints.
+- [`multipass_networks`](data-sources/networks.md) – List host bridge targets.
+- [`multipass_instance`](data-sources/instance.md) – Inspect existing Multipass instances.
+- [`multipass_snapshots`](data-sources/snapshots.md) – List snapshots for an instance.

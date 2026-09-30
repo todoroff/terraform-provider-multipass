@@ -1,4 +1,9 @@
-# Resource: multipass_alias
+---
+page_title: "multipass_alias Resource - multipass"
+description: "Manage a host-side command alias for a Multipass instance."
+---
+
+# multipass_alias (Resource)
 
 Creates a host-side alias that executes a command inside a Multipass instance.
 
@@ -34,5 +39,4 @@ An existing alias can be imported by name:
 ```bash
 terraform import multipass_alias.ls_workspace ls-workspace
 ```
-
 
