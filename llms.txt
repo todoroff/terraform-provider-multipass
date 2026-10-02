@@ -4,7 +4,7 @@
 
 The provider shells out to the `multipass` CLI (no REST API). It supports five resources and four data sources for full VM lifecycle management.
 
-Provider configuration accepts: `multipass_path` (default: `"multipass"` from PATH), `command_timeout` (default: `600` seconds), and `default_image` (default: `"lts"`).
+Provider configuration accepts: `multipass_path` (default: `"multipass"` from PATH), `server_address` (optional per-provider override of `MULTIPASS_SERVER_ADDRESS`, otherwise environment / CLI local default), `command_timeout` (default: `600` seconds), and `default_image` (default: `"lts"`). Use provider aliases to select multiple remote daemons; the local CLI user must authenticate with each daemon first.
 
 ## Resources
 
@@ -23,6 +23,7 @@ Provider configuration accepts: `multipass_path` (default: `"multipass"` from PA
 
 ## Examples
 
+- [Remote hosts](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/remote-hosts/main.tf): Two provider aliases targeting different remote daemons.
 - [Basic](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/basic/main.tf): Minimal instance with an alias.
 - [Dev Lab](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/dev-lab/main.tf): Multi-tier lab (DB/API/Web) with dependency ordering and shared locals.
 - [Bridged Workstation](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/bridged-workstation/main.tf): Bridged networking, host mounts, and primary instance.
@@ -31,5 +32,6 @@ Provider configuration accepts: `multipass_path` (default: `"multipass"` from PA
 
 ## Optional
 
+- [Remote-host guide](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/docs/guides/remote-hosts.md): Daemon setup, CLI authentication, address precedence, and networking requirements.
 - [Full LLM context](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/AGENTS.md): Complete provider reference with all arguments, computed attributes, inline examples, troubleshooting, and import ID formats in a single file.
 - [Examples overview](https://raw.githubusercontent.com/todoroff/terraform-provider-multipass/master/examples/README.md): Descriptions of all example scenarios.

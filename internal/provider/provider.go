@@ -3,16 +3,19 @@ package provider
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/go-version"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
@@ -60,6 +63,14 @@ func (p *MultipassProvider) Schema(_ context.Context, _ provider.SchemaRequest, 
 				Description:         "Path to the multipass binary. Defaults to the first multipass found in PATH.",
 				MarkdownDescription: "Path to the `multipass` binary. Defaults to `multipass`, which requires the CLI to be available on the `PATH`.",
 			},
+			"server_address": schema.StringAttribute{
+				Optional: true,
+				Description: "Multipass daemon address, such as host:50051. Overrides MULTIPASS_SERVER_ADDRESS for this provider configuration. " +
+					"When omitted, inherits that environment variable or uses the CLI's local default. The CLI must trust the target daemon's TLS certificate and be authenticated with it.",
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(regexp.MustCompile(`^[^\s\x00]+$`), "must be non-empty and contain no whitespace or NUL characters"),
+				},
+			},
 			"command_timeout": schema.Int64Attribute{
 				Optional: true,
 				Description: fmt.Sprintf(
@@ -94,6 +105,18 @@ func (p *MultipassProvider) Configure(ctx context.Context, req provider.Configur
 		cfg.BinaryPath = config.MultipassPath.ValueString()
 	}
 
+	if config.ServerAddress.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("server_address"),
+			"Unknown Multipass server address",
+			"The server_address must be known before configuring the provider. Use an address available before apply so commands target the intended daemon.",
+		)
+		return
+	}
+	if !config.ServerAddress.IsNull() {
+		cfg.ServerAddress = config.ServerAddress.ValueString()
+	}
+
 	if !config.CommandTimeout.IsNull() && !config.CommandTimeout.IsUnknown() {
 		if config.CommandTimeout.ValueInt64() <= 0 {
 			resp.Diagnostics.AddAttributeError(
@@ -111,8 +134,9 @@ func (p *MultipassProvider) Configure(ctx context.Context, req provider.Configur
 	}
 
 	client, err := multipasscli.NewClient(ctx, multipasscli.Config{
-		BinaryPath: cfg.BinaryPath,
-		Timeout:    cfg.CommandTimeout,
+		BinaryPath:    cfg.BinaryPath,
+		Timeout:       cfg.CommandTimeout,
+		ServerAddress: cfg.ServerAddress,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to create multipass client", err.Error())

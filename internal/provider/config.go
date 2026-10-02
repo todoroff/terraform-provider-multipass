@@ -10,12 +10,14 @@ import (
 
 type providerConfigModel struct {
 	MultipassPath  types.String `tfsdk:"multipass_path"`
+	ServerAddress  types.String `tfsdk:"server_address"`
 	CommandTimeout types.Int64  `tfsdk:"command_timeout"`
 	DefaultImage   types.String `tfsdk:"default_image"`
 }
 
 type providerConfig struct {
 	BinaryPath     string
+	ServerAddress  string
 	CommandTimeout int
 	DefaultImage   string
 }

@@ -14,6 +14,8 @@ provider "multipass" {
 }
 ```
 
+Use `server_address = "host:50051"` to select a remote daemon. The [remote-host guide](guides/remote-hosts.md) covers authentication, multiple provider aliases, and network requirements. Omitting the address preserves `MULTIPASS_SERVER_ADDRESS` and the CLI's local default behavior.
+
 ## Resources
 
 - [`multipass_instance`](resources/instance.md) – manage VM lifecycle, networks, mounts, and metadata.

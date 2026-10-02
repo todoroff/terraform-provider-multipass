@@ -51,13 +51,15 @@ type Client interface {
 
 // Config controls the multipass CLI client instantiation.
 type Config struct {
-	BinaryPath string
-	Timeout    int // Seconds
+	BinaryPath    string
+	Timeout       int    // Seconds
+	ServerAddress string // Overrides MULTIPASS_SERVER_ADDRESS for this client's subprocesses when non-empty.
 }
 
 type client struct {
-	binaryPath string
-	timeout    time.Duration
+	binaryPath    string
+	timeout       time.Duration
+	serverAddress string
 
 	mu sync.Mutex
 
@@ -107,8 +109,9 @@ func NewClient(ctx context.Context, cfg Config) (Client, error) {
 	}
 
 	return &client{
-		binaryPath: binary,
-		timeout:    timeout,
+		binaryPath:    binary,
+		timeout:       timeout,
+		serverAddress: cfg.ServerAddress,
 	}, nil
 }
 
@@ -591,6 +594,12 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 	}
 
 	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
+	if c.serverAddress != "" {
+		// Set only the child environment so provider aliases can target different
+		// daemons concurrently. os/exec uses the last value for duplicate keys
+		// (case-insensitively on Windows), preserving the rest of the environment.
+		cmd.Env = append(cmd.Environ(), "MULTIPASS_SERVER_ADDRESS="+c.serverAddress)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

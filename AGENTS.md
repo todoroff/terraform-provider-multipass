@@ -31,8 +31,11 @@ resource "multipass_instance" "dev" {
 | Argument          | Default       | Description                                          |
 |-------------------|---------------|------------------------------------------------------|
 | `multipass_path`  | `"multipass"` | Path to the `multipass` binary.                      |
+| `server_address`  | Environment / CLI default | Daemon address such as `host:50051`; overrides `MULTIPASS_SERVER_ADDRESS` for this provider configuration. |
 | `command_timeout` | `600`         | CLI command timeout in seconds. Must be > 0.         |
 | `default_image`   | `"lts"`       | Fallback image when instance omits `image`.          |
+
+For remote hosts, install the CLI on the Terraform machine, configure a reachable daemon endpoint, establish TLS trust, and authenticate the same CLI user with that daemon. Multipass 1.16 uses an application-specific CA bundle and the CLI's TLS server name is `localhost`; see [the remote-host guide](docs/guides/remote-hosts.md) for the tested SSH tunnel setup and trust requirements. Provider aliases can select different addresses concurrently. Omitted/null addresses inherit `MULTIPASS_SERVER_ADDRESS`; an unset/empty environment variable uses the CLI's local default. Explicit addresses must be non-empty, contain no whitespace or NUL characters, and be known before provider configuration. See [the two-host example](examples/remote-hosts/main.tf).
 
 ## Resources
 
