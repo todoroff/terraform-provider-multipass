@@ -66,6 +66,11 @@ func TestProviderServerAddressValidation(t *testing.T) {
 		{"blank", " ", true},
 		{"leading space", " host:50051", true},
 		{"newline", "host:50051\n", true},
+		{"vertical tab", "host:\v50051", true},
+		{"non-breaking space", "host:\u00a050051", true},
+		{"next line", "host:\u008550051", true},
+		{"unicode line separator", "host:\u202850051", true},
+		{"ideographic space", "host:\u300050051", true},
 		{"nul", "host\x00:50051", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

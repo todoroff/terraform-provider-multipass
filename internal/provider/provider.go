@@ -68,7 +68,8 @@ func (p *MultipassProvider) Schema(_ context.Context, _ provider.SchemaRequest, 
 				Description: "Multipass daemon address, such as host:50051. Overrides MULTIPASS_SERVER_ADDRESS for this provider configuration. " +
 					"When omitted, inherits that environment variable or uses the CLI's local default. The CLI must trust the target daemon's TLS certificate and be authenticated with it.",
 				Validators: []validator.String{
-					stringvalidator.RegexMatches(regexp.MustCompile(`^[^\s\x00]+$`), "must be non-empty and contain no whitespace or NUL characters"),
+					// regexp's \s omits vertical tab, NEL, and Unicode separators.
+					stringvalidator.RegexMatches(regexp.MustCompile(`^[^\s\p{Z}\x00\x0b\x85]+$`), "must be non-empty and contain no whitespace or NUL characters"),
 				},
 			},
 			"command_timeout": schema.Int64Attribute{
