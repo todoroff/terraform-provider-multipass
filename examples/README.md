@@ -35,3 +35,7 @@ Each Terraform scenario above contains a `main.tf` (and supporting files where n
 ## 6. `pulumi/`
 
 [TypeScript and Python examples](pulumi/) use Pulumi's Terraform bridge with pinned provider versions. They demonstrate VM creation, cloud-init, optional mounts/networks, an alias, an output-dependent upload, and image queries. Run `pulumi install` inside the language directory. See the [Pulumi guide](../docs/guides/pulumi.md) for setup and lifecycle details.
+
+## 7. `remote-hosts/`
+
+[Two remote hosts](remote-hosts/main.tf) selected through separate provider aliases. Each host gets an instance and an instance data source. Set both daemon addresses and authenticate the local CLI user with each daemon before applying; see the [remote-host guide](../docs/guides/remote-hosts.md).

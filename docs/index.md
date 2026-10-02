@@ -32,8 +32,13 @@ provider "multipass" {
 The following arguments are supported in the `provider "multipass"` block:
 
 - `multipass_path` – Optional. Explicit path to the `multipass` binary. Defaults to resolving `multipass` on `PATH`.
+- `server_address` – Optional. Multipass daemon address, such as `host:50051`. Sets `MULTIPASS_SERVER_ADDRESS` for this provider's CLI commands. When omitted or null, inherits the environment variable, or uses the CLI's local default if it is unset or empty. Explicit values must be non-empty, contain no whitespace or NUL characters, and be known before provider configuration.
 - `command_timeout` – Optional. Timeout for CLI commands, in seconds. Default: `600`.
 - `default_image` – Optional. Default image alias/name used when `multipass_instance.image` is omitted.
+
+## Remote hosts
+
+Use `server_address` and Terraform provider aliases to manage multiple hosts. The CLI must be installed on the Terraform machine, trust each daemon's TLS certificate, and be authenticated with each daemon. See the [remote-host guide](guides/remote-hosts.md) for the Multipass 1.16 trust setup and the [two-host example](../examples/remote-hosts/).
 
 ## Resources
 

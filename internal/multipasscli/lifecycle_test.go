@@ -16,6 +16,10 @@ import (
 
 // Reuse the test executable as a portable CLI subprocess. No real VMs are touched.
 func TestMain(m *testing.M) {
+	if os.Getenv("MULTIPASS_TEST_ECHO_ENV") == "1" {
+		echoCommandEnvironment()
+		os.Exit(0)
+	}
 	if logPath := os.Getenv("MULTIPASS_TEST_COMMAND_LOG"); logPath != "" {
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {

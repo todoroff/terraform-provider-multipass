@@ -9,6 +9,7 @@
 ## Features
 
 - Provider configuration for CLI discovery, command timeouts, default images, and cached `multipass` metadata.
+- Remote Multipass daemons through `server_address`, with provider aliases for managing multiple hosts.
 - `multipass_instance` resource with CPU/memory/disk sizing, multiple networks, host mounts, and inline or file-based cloud-init.
 - Configurable resizing: CPU, memory, and disk growth update the existing VM by default; `resize_policy = "replace"` rebuilds it instead.
 - `multipass_snapshot` resource for managing named snapshots (create/list/delete/import).
@@ -85,8 +86,28 @@ Start with the [TypeScript or Python examples](examples/pulumi/). The [Pulumi gu
 | Attribute        | Type   | Description                                                                 |
 | ---------------- | ------ | --------------------------------------------------------------------------- |
 | `multipass_path` | String | Optional explicit path to the `multipass` binary. Defaults to PATH lookup. |
+| `server_address` | String | Optional daemon address, such as `host:50051`. Overrides `MULTIPASS_SERVER_ADDRESS` for this provider; otherwise inherits the environment or the CLI's local default. |
 | `command_timeout`| Int    | Timeout in seconds for CLI calls (default 600).                             |
 | `default_image`  | String | Fallback image alias/name when resources omit `image`.                      |
+
+## Remote hosts
+
+Set `server_address` on each provider configuration to manage instances on different Multipass hosts:
+
+```hcl
+provider "multipass" {
+  alias          = "remote"
+  server_address = "192.0.2.10:50051"
+}
+
+resource "multipass_instance" "remote_dev" {
+  provider = multipass.remote
+  name     = "remote-dev"
+  image    = "lts"
+}
+```
+
+The Multipass CLI still runs on the Terraform machine. Configure the remote daemon's endpoint, establish TLS trust, and authenticate that CLI user with it before applying. Multipass 1.16 needs the remote CA in its application-specific trust bundle. See the [remote-host guide](docs/guides/remote-hosts.md) for the tested SSH tunnel setup, environment precedence, and networking requirements, or the [two-host example](examples/remote-hosts/).
 
 ## Resources
 
