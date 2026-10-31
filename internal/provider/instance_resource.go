@@ -67,6 +67,7 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Description:         "Instance name.",
 				MarkdownDescription: "Instance name. Must be unique per Multipass host.",
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:          []validator.String{stringvalidator.LengthAtLeast(1)},
 			},
 			"image": schema.StringAttribute{
 				Optional:            true,
@@ -255,6 +256,10 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	var plan instanceResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !hasStringValue(plan.Name) {
+		resp.Diagnostics.AddAttributeError(path.Root("name"), "Invalid instance name", "Instance name must be known and non-empty before launch.")
 		return
 	}
 
