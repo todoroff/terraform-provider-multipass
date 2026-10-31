@@ -144,7 +144,7 @@ Transfer files or inline content into an instance. Full schema: [docs/resources/
 
 - Changing `instance` or `destination` forces recreation.
 - Updates re-transfer when `content_hash` changes.
-- Destroy removes only the recorded owned path; files use nonrecursive deletion. Older recursive state must be re-imported with the exact owned path before mutation. See the upload guide.
+- Destroy removes only the recorded owned path; files use nonrecursive deletion. Older recursive state remains usable without re-import; ambiguous remote files are retained on destroy with a warning until a successful update records ownership. See the upload guide.
 
 ```hcl
 resource "multipass_file_upload" "config" {

@@ -44,14 +44,18 @@ func hashFile(path string) (string, error) {
 }
 
 func hashDirectory(root string) (string, error) {
+	return hashDirectoryFormat(root, false)
+}
+
+func hashDirectoryFormat(root string, legacy bool) (string, error) {
 	h := sha256.New()
-	if err := walkDirectory(root, root, h); err != nil {
+	if err := walkDirectory(root, root, h, legacy); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func walkDirectory(root, current string, h io.Writer) error {
+func walkDirectory(root, current string, h io.Writer, legacy bool) error {
 	entries, err := os.ReadDir(current)
 	if err != nil {
 		return err
@@ -66,13 +70,17 @@ func walkDirectory(root, current string, h io.Writer) error {
 		if err != nil {
 			return err
 		}
-		// NUL cannot occur in a filename; separate names and entry kinds.
-		if _, err := fmt.Fprintf(h, "%t\x00%s\x00", entry.IsDir(), filepath.ToSlash(rel)); err != nil {
+		name := filepath.ToSlash(rel)
+		if !legacy {
+			// NUL cannot occur in a filename; separate names and entry kinds.
+			name = fmt.Sprintf("%t\x00%s\x00", entry.IsDir(), name)
+		}
+		if _, err := io.WriteString(h, name); err != nil {
 			return err
 		}
 
 		if entry.IsDir() {
-			if err := walkDirectory(root, path, h); err != nil {
+			if err := walkDirectory(root, path, h, legacy); err != nil {
 				return err
 			}
 			continue

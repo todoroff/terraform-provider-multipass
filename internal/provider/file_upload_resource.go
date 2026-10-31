@@ -73,13 +73,13 @@ func (r *fileUploadResource) Schema(ctx context.Context, _ resource.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"resolved_destination": schema.StringAttribute{
 				Computed:      true,
-				Description:   "Exact remote path owned by this upload, including the child name when destination is a directory.",
-				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+				Description:   "Exact remote path owned by this upload, including the child name when destination is a directory. Unset for legacy recursive uploads until a successful update records ownership.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown()},
 			},
 			"directory": schema.BoolAttribute{
 				Computed:      true,
 				Description:   "Whether the owned payload is a directory. File deletion is never recursive.",
-				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseNonNullStateForUnknown()},
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -194,6 +194,17 @@ func (r *fileUploadResource) ModifyPlan(ctx context.Context, req resource.Modify
 	}
 
 	plan.ContentHash = types.StringValue(hashValue)
+	if !req.State.Raw.IsNull() {
+		var state fileUploadResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if legacyRecursiveUpload(&state) && !plan.ContentHash.Equal(state.ContentHash) {
+			plan.ResolvedDestination = types.StringUnknown()
+			plan.Directory = types.BoolUnknown()
+		}
+	}
 	resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
 }
 
@@ -259,7 +270,10 @@ func (r *fileUploadResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 
-	if err := r.resolveLegacyUpload(ctx, &state); err != nil {
+	if legacyRecursiveUpload(&state) {
+		upgradeLegacyUploadHash(&state)
+		resp.Diagnostics.AddWarning("Legacy upload ownership is unknown", "This upload remains usable without re-import. Until a successful update records its exact destination, destroying it retains the remote files because the old state cannot identify the owned directory safely.")
+	} else if err := r.resolveLegacyUpload(ctx, &state); err != nil {
 		resp.Diagnostics.AddError("Unknown upload ownership", err.Error())
 		return
 	}
@@ -314,6 +328,10 @@ func (r *fileUploadResource) Delete(ctx context.Context, req resource.DeleteRequ
 	}
 
 	instance := state.Instance.ValueString()
+	if legacyRecursiveUpload(&state) {
+		resp.Diagnostics.AddWarning("Legacy upload files retained", fmt.Sprintf("Removed the upload from state without deleting remote files at %s:%s. The old state does not identify which directory belongs to this upload; inspect the guest before removing any retained files manually.", instance, state.Destination.ValueString()))
+		return
+	}
 	if err := r.resolveLegacyUpload(ctx, &state); err != nil {
 		resp.Diagnostics.AddError("Unknown upload ownership", err.Error())
 		return
@@ -425,11 +443,31 @@ func (r *fileUploadResource) remotePathKind(ctx context.Context, instance, dest 
 	return "", fmt.Errorf("unexpected remote path type %q", kind)
 }
 
+func legacyRecursiveUpload(model *fileUploadResourceModel) bool {
+	return model.Recursive.ValueBool() && !hasStringValue(model.ResolvedDestination)
+}
+
+// Upgrade only an unchanged payload's hash; refresh must not hide pending edits.
+func upgradeLegacyUploadHash(model *fileUploadResourceModel) {
+	if !hasStringValue(model.Source) || !hasStringValue(model.ContentHash) {
+		return
+	}
+	info, err := os.Stat(model.Source.ValueString())
+	if err != nil || !info.IsDir() {
+		return
+	}
+	current, err := hashDirectory(model.Source.ValueString())
+	if err != nil || current == model.ContentHash.ValueString() {
+		return
+	}
+	previous, err := hashDirectoryFormat(model.Source.ValueString(), true)
+	if err == nil && previous == model.ContentHash.ValueString() {
+		model.ContentHash = types.StringValue(current)
+	}
+}
+
 func (r *fileUploadResource) resolveLegacyUpload(ctx context.Context, model *fileUploadResourceModel) error {
 	if !hasStringValue(model.ResolvedDestination) {
-		if model.Recursive.ValueBool() {
-			return fmt.Errorf("legacy recursive upload does not record its owned path; re-import using <instance>:<exact-owned-path> before updating or deleting it")
-		}
 		dest := model.Destination.ValueString()
 		if dest == "" {
 			return fmt.Errorf("destination must be non-empty")
@@ -481,7 +519,7 @@ func (r *fileUploadResource) transferUpload(ctx context.Context, model *fileUplo
 	}
 	dest := model.ResolvedDestination.ValueString()
 	if !hasStringValue(model.ResolvedDestination) {
-		if hasStringValue(model.ID) {
+		if hasStringValue(model.ID) && !legacyRecursiveUpload(model) {
 			if err := r.resolveLegacyUpload(ctx, model); err != nil {
 				diags.AddError("Unknown upload ownership", err.Error())
 				return

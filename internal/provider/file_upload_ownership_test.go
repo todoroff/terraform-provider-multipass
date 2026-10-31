@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/todoroff/terraform-provider-multipass/internal/models"
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
@@ -23,6 +24,10 @@ type uploadOwnershipClient struct {
 	multipasscli.Client
 	paths map[string]string
 	calls [][]string
+}
+
+func (c *uploadOwnershipClient) GetInstance(_ context.Context, name string) (*models.Instance, error) {
+	return &models.Instance{Name: name}, nil
 }
 
 func (c *uploadOwnershipClient) ExecCapture(_ context.Context, _ string, args []string) ([]byte, error) {
@@ -165,8 +170,8 @@ func TestUploadLegacyOwnershipAndImport(t *testing.T) {
 	}
 	m.ResolvedDestination = types.StringNull()
 	m.Recursive = types.BoolValue(true)
-	if err := r.resolveLegacyUpload(ctx, &m); err == nil {
-		t.Fatal("ambiguous legacy directory accepted")
+	if !legacyRecursiveUpload(&m) {
+		t.Fatal("ambiguous legacy directory not recognized")
 	}
 	s := resourceSchema(r)
 	imp := resource.ImportStateResponse{State: tfsdk.State{Schema: s, Raw: resourceValue(s, map[string]any{})}}
