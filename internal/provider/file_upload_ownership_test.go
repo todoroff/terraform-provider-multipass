@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -198,5 +199,73 @@ func TestUploadDirectoryRetainsRenamedRoot(t *testing.T) {
 	want := map[string]string{"/shared": "directory", "/shared/keep": "unrelated", "/shared/renamed": "directory", "/shared/renamed/payload": "uploaded"}
 	if !reflect.DeepEqual(c.paths, want) {
 		t.Fatal(c.paths)
+	}
+}
+
+type interruptedUploadClient struct {
+	*uploadOwnershipClient
+	interrupt         func(context.Context)
+	cleanupErr        error
+	cleanupContextErr error
+	cleanupDeadline   time.Time
+}
+
+func (c *interruptedUploadClient) Transfer(ctx context.Context, opts multipasscli.TransferOptions) error {
+	if err := c.uploadOwnershipClient.Transfer(ctx, opts); err != nil {
+		return err
+	}
+	c.interrupt(ctx)
+	return ctx.Err()
+}
+
+func (c *interruptedUploadClient) Exec(ctx context.Context, instance string, args []string) error {
+	c.cleanupContextErr = ctx.Err()
+	c.cleanupDeadline, _ = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.cleanupErr != nil {
+		return c.cleanupErr
+	}
+	return c.uploadOwnershipClient.Exec(ctx, instance, args)
+}
+
+func TestUploadCleansStagingAfterInterruption(t *testing.T) {
+	for _, kind := range []string{"cancel", "timeout", "cleanup failure"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			interrupt := func(context.Context) { cancel() }
+			if kind == "timeout" {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 10*time.Millisecond)
+				interrupt = func(ctx context.Context) { <-ctx.Done() }
+			}
+			defer cancel()
+			c := &interruptedUploadClient{
+				uploadOwnershipClient: &uploadOwnershipClient{paths: map[string]string{"/owned": "directory", "/owned/keep": "previous"}},
+				interrupt:             interrupt,
+			}
+			if kind == "cleanup failure" {
+				c.cleanupErr = errors.New("guest unavailable")
+			}
+			r := &fileUploadResource{client: c}
+			m := fileUploadResourceModel{Instance: types.StringValue("vm"), Source: types.StringValue(t.TempDir()), Destination: types.StringValue("/owned"), ResolvedDestination: types.StringValue("/owned"), Directory: types.BoolValue(true), Recursive: types.BoolValue(true)}
+			before := time.Now()
+			d := r.transferUpload(ctx, &m)
+			if !d.HasError() || d[0].Detail() != ctx.Err().Error() {
+				t.Fatalf("original transfer error lost: %v", d)
+			}
+			if c.cleanupContextErr != nil || !c.cleanupDeadline.After(before) || c.cleanupDeadline.After(time.Now().Add(30*time.Second)) {
+				t.Fatalf("cleanup context: err=%v deadline=%v", c.cleanupContextErr, c.cleanupDeadline)
+			}
+			if c.cleanupErr == nil {
+				want := map[string]string{"/owned": "directory", "/owned/keep": "previous"}
+				if !reflect.DeepEqual(c.paths, want) || d.WarningsCount() != 0 {
+					t.Fatalf("staging not cleaned: %v %v", c.paths, d)
+				}
+			} else if d.WarningsCount() != 1 || !strings.Contains(d[1].Detail(), c.cleanupErr.Error()) {
+				t.Fatalf("cleanup failure not reported: %v", d)
+			}
+		})
 	}
 }

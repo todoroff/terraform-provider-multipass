@@ -542,7 +542,9 @@ func (r *fileUploadResource) transferUpload(ctx context.Context, model *fileUplo
 			return
 		}
 		defer func() {
-			if err := r.client.Exec(ctx, instance, []string{"rm", "-rf", "--", stage}); err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			if err := r.client.Exec(cleanupCtx, instance, []string{"rm", "-rf", "--", stage}); err != nil {
 				diags.AddWarning("Failed to clean upload staging", fmt.Sprintf("Remove %q after checking the transfer: %v", stage, err))
 			}
 		}()

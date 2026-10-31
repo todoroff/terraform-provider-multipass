@@ -68,6 +68,7 @@ Exactly one of `source` or `content` must be provided.
 * Inline `content` is sent through stdin. When targeting an existing directory, Multipass names this file `stream_output.dat`.
 * Destroy removes only `resolved_destination`. File payloads use nonrecursive deletion; directory payloads own their complete directory tree. Deletion failures retain the resource in Terraform state.
 * Updates keep writing to the recorded path, even if the local source filename changes. Changing between a file and a directory requires explicit resource replacement. Existing directory uploads use private guest staging to merge contents into the same owned root.
+* Guest staging cleanup gets up to 30 additional seconds after an upload finishes, fails, or is canceled. Cleanup failures report the retained staging path without hiding the original transfer error.
 
 Directory hashes include entry boundaries and types. Upgrading from the old hash format causes a one-time re-upload of directory payloads.
 
