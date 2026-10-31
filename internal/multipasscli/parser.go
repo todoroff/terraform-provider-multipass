@@ -195,7 +195,8 @@ func (r networksResponse) toModel() []models.Network {
 }
 
 type aliasesResponse struct {
-	Contexts map[string]map[string]aliasEntry `json:"contexts"`
+	ActiveContext string                           `json:"active-context"`
+	Contexts      map[string]map[string]aliasEntry `json:"contexts"`
 }
 
 type aliasEntry struct {
@@ -206,17 +207,18 @@ type aliasEntry struct {
 
 func (r aliasesResponse) toModel() []models.Alias {
 	out := []models.Alias{}
-	for _, ctx := range r.Contexts {
+	for contextName, ctx := range r.Contexts {
 		for name, entry := range ctx {
 			out = append(out, models.Alias{
 				Name:     name,
+				Context:  contextName,
 				Instance: entry.Instance,
 				Command:  entry.Command,
 			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].Name < out[j].Name
+		return out[i].Context+"."+out[i].Name < out[j].Context+"."+out[j].Name
 	})
 	return out
 }

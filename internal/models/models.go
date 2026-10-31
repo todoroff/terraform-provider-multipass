@@ -81,6 +81,7 @@ type Network struct {
 // Alias models a `multipass alias` entry.
 type Alias struct {
 	Name             string
+	Context          string
 	Instance         string
 	Command          string
 	WorkingDirectory string // optional explicit directory (wraps command with cd)

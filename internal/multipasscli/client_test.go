@@ -2,6 +2,7 @@ package multipasscli
 
 import (
 	"context"
+	"github.com/todoroff/terraform-provider-multipass/internal/models"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,5 +122,24 @@ func TestTransferCapture_rejectsStdin(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "stdin") {
 		t.Fatalf("expected error to mention stdin, got: %v", err)
+	}
+}
+
+func TestAliasContextParsingAndCreationGuard(t *testing.T) {
+	c, logPath := recordingClient(t)
+	t.Setenv("MULTIPASS_TEST_RESPONSES", `{"aliases --format json":{"Stdout":"{\"active-context\":\"prod\",\"contexts\":{\"dev\":{\"shell\":{\"instance\":\"dev-vm\"}},\"prod\":{\"shell\":{\"instance\":\"prod-vm\"}}}}"}}`)
+	aliases, err := c.ListAliases(context.Background(), true)
+	if err != nil || len(aliases) != 2 || aliases[0].Context != "dev" || aliases[1].Context != "prod" {
+		t.Fatalf("%+v %v", aliases, err)
+	}
+	if err := c.CreateAlias(context.Background(), models.Alias{Name: "shell", Context: "dev", Instance: "dev-vm", Command: "bash"}); err == nil {
+		t.Fatal("wrong-context create accepted")
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"alias",`) {
+		t.Fatal("wrong context mutated aliases")
 	}
 }

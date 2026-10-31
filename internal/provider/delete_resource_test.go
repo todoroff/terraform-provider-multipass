@@ -36,7 +36,7 @@ func TestDeleteMissingResources(t *testing.T) {
 	}{
 		{"instance", NewInstanceResource, map[string]any{"id": "vm", "name": "vm", "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}}},
 		{"snapshot", NewSnapshotResource, map[string]any{"id": "vm.snap", "instance": "vm", "name": "snap"}},
-		{"alias", NewAliasResource, map[string]any{"id": "alias", "name": "alias", "instance": "vm", "command": "ls"}},
+		{"alias", NewAliasResource, map[string]any{"id": "default.alias", "context": "default", "name": "alias", "instance": "vm", "command": "ls"}},
 	} {
 		for _, tc := range []struct {
 			name      string
@@ -68,7 +68,7 @@ func TestAliasUpdateRecreatesMissingAlias(t *testing.T) {
 	client := &deleteTestClient{err: fmt.Errorf("CLI: %w", multipasscli.ErrNotFound)}
 	r := &aliasResource{client: client}
 	s := resourceSchema(r)
-	plan := tfsdk.Plan{Schema: s, Raw: resourceValue(s, map[string]any{"id": "alias", "name": "alias", "instance": "vm", "command": "ls"})}
+	plan := tfsdk.Plan{Schema: s, Raw: resourceValue(s, map[string]any{"id": "default.alias", "context": "default", "name": "alias", "instance": "vm", "command": "ls"})}
 	resp := resource.UpdateResponse{State: tfsdk.State{Schema: s}}
 	r.Update(ctx, resource.UpdateRequest{Plan: plan}, &resp)
 	if resp.Diagnostics.HasError() {
@@ -110,4 +110,11 @@ func TestUploadDeleteFailureKeepsResource(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (c *deleteTestClient) CurrentAliasContext(context.Context) (string, error) {
+	return "default", nil
+}
+func (c *deleteTestClient) ListAliases(context.Context, bool) ([]models.Alias, error) {
+	return []models.Alias{{Name: "alias", Context: "default", Instance: "vm"}}, nil
 }

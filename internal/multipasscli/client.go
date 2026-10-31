@@ -38,6 +38,7 @@ type Client interface {
 	ListImages(ctx context.Context, refresh bool) ([]models.Image, error)
 	ListNetworks(ctx context.Context, refresh bool) ([]models.Network, error)
 	ListAliases(ctx context.Context, refresh bool) ([]models.Alias, error)
+	CurrentAliasContext(ctx context.Context) (string, error)
 	CreateAlias(ctx context.Context, alias models.Alias) error
 	DeleteAlias(ctx context.Context, name string) error
 	ListSnapshots(ctx context.Context, instance string) ([]models.Snapshot, error)
@@ -378,6 +379,15 @@ func (c *client) CreateAlias(ctx context.Context, alias models.Alias) error {
 	if alias.Name == "" || alias.Instance == "" || alias.Command == "" {
 		return fmt.Errorf("alias requires name, instance, and command")
 	}
+	if alias.Context != "" {
+		current, err := c.CurrentAliasContext(ctx)
+		if err != nil {
+			return err
+		}
+		if current != alias.Context {
+			return fmt.Errorf("select alias context %q with multipass prefer before creating or updating this alias (current context: %q)", alias.Context, current)
+		}
+	}
 	args := []string{"alias", "--no-map-working-directory"}
 
 	command := aliasCommand(alias.Command, alias.WorkingDirectory)
@@ -390,6 +400,17 @@ func (c *client) CreateAlias(ctx context.Context, alias models.Alias) error {
 	}
 	c.invalidateAliases()
 	return nil
+}
+
+func (c *client) CurrentAliasContext(ctx context.Context) (string, error) {
+	var payload aliasesResponse
+	if err := c.runJSON(ctx, &payload, "aliases"); err != nil {
+		return "", err
+	}
+	if payload.ActiveContext == "" {
+		return "", fmt.Errorf("multipass did not report its active alias context")
+	}
+	return payload.ActiveContext, nil
 }
 
 func (c *client) DeleteAlias(ctx context.Context, name string) error {
