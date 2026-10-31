@@ -26,6 +26,28 @@ func testAcc117PreCheck(t *testing.T) {
 	}
 }
 
+func TestAcc117ZonesDataSource(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() { testAcc117PreCheck(t) }, ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: testProviderConfig + `
+data "multipass_zones" "all" {}
+data "multipass_zones" "selected" { name = data.multipass_zones.all.zones[0].name }
+data "multipass_zones" "missing" { name = "terraform-nonexistent-zone" }
+`,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrSet("data.multipass_zones.all", "zones.0.name"),
+				resource.TestCheckResourceAttrSet("data.multipass_zones.all", "zones.0.subnet"),
+				resource.TestCheckResourceAttr("data.multipass_zones.selected", "zones.#", "1"),
+				resource.TestCheckResourceAttr("data.multipass_zones.missing", "zones.#", "0"),
+				resource.TestCheckResourceAttrPair("data.multipass_zones.all", "zones.0.name", "data.multipass_zones.selected", "zones.0.name"),
+				resource.TestCheckResourceAttrPair("data.multipass_zones.all", "zones.0.available", "data.multipass_zones.selected", "zones.0.available"),
+				resource.TestCheckResourceAttrPair("data.multipass_zones.all", "zones.0.subnet", "data.multipass_zones.selected", "zones.0.subnet"),
+			),
+		}},
+	})
+}
+
 func TestAcc117Zones(t *testing.T) {
 	name, automatic := randomName(), randomName()
 	config := testProviderConfig + fmt.Sprintf(`
