@@ -546,14 +546,15 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 			resp.Diagnostics.AddError("Failed to unmount existing mounts", err.Error())
 			return
 		}
+		state.Mounts = []mountConfigModel{}
 
 		for _, m := range plan.Mounts {
 			if err := r.client.Mount(ctx, plan.Name.ValueString(), mountConfigToModel(m)); err != nil {
 				resp.Diagnostics.AddError("Failed to mount directory", err.Error())
 				return
 			}
+			state.Mounts = append(state.Mounts, m)
 		}
-		state.Mounts = plan.Mounts
 	}
 
 	refreshDiags := r.refreshState(ctx, plan.Name.ValueString(), &plan)
