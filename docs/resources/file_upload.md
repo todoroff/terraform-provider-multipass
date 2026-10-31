@@ -59,11 +59,18 @@ Exactly one of `source` or `content` must be provided.
 
 * `id` – Canonical identifier of the form `<instance>:<destination>`.
 * `content_hash` – SHA256 hash of the payload used for drift detection.
+* `resolved_destination` – Exact remote path owned by the resource, including the child filename when uploading into an existing directory.
+* `directory` – Whether the owned payload is a directory.
 
 ## Behavior & Notes
 
 * Updates re-run `multipass transfer` whenever `content_hash` changes, mirroring how Terraform provisioners behave during apply.
-* When using `content`, data never touches disk outside of a short-lived temp file that is deleted after the transfer.
-* Destroying the resource removes the remote path via `multipass exec <instance> rm -rf -- <destination>`. Use caution when pointing `destination` at directories shared with other resources.
+* Inline `content` is sent through stdin. When targeting an existing directory, Multipass names this file `stream_output.dat`.
+* Destroy removes only `resolved_destination`. File payloads use nonrecursive deletion; directory payloads own their complete directory tree. Deletion failures retain the resource in Terraform state.
+* Updates keep writing to the recorded path, even if the local source filename changes. Changing between a file and a directory requires explicit resource replacement. Existing directory uploads use private guest staging to merge contents into the same owned root.
 
 Directory hashes include entry boundaries and types. Upgrading from the old hash format causes a one-time re-upload of directory payloads.
+
+### Upgrading existing upload state
+
+Older file uploads resolve the owned child path during refresh. Older recursive uploads did not record whether `destination` was an existing parent or the newly created payload root, so the provider refuses to guess. Back up Terraform state, identify the exact uploaded directory, set `destination` to that exact path, remove only that upload's state entry with `terraform state rm`, and import it again as `<instance>:<exact-owned-path>`. Import and refresh require a running, reachable guest. Review the plan before applying.

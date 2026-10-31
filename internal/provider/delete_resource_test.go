@@ -99,7 +99,7 @@ func TestUploadDeleteFailureKeepsResource(t *testing.T) {
 				return nil, tc.listErr
 			}}}
 			s := resourceSchema(r)
-			state := tfsdk.State{Schema: s, Raw: resourceValue(s, map[string]any{"id": "vm:/file", "instance": "vm", "destination": "/file"})}
+			state := tfsdk.State{Schema: s, Raw: resourceValue(s, map[string]any{"id": "vm:/file", "instance": "vm", "destination": "/file", "resolved_destination": "/file", "directory": false})}
 			resp := resource.DeleteResponse{State: state}
 			r.Delete(context.Background(), resource.DeleteRequest{State: state}, &resp)
 			if resp.Diagnostics.HasError() != tc.wantError {

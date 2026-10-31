@@ -28,6 +28,7 @@ type Client interface {
 	SetInstanceResource(ctx context.Context, name string, setting ResourceSetting, value uint64) error
 	LaunchInstance(ctx context.Context, opts models.LaunchOptions) error
 	Exec(ctx context.Context, instance string, command []string) error
+	ExecCapture(ctx context.Context, instance string, command []string) ([]byte, error)
 	StartInstance(ctx context.Context, name string) error
 	StopInstance(ctx context.Context, name string, force bool) error
 	SuspendInstance(ctx context.Context, name string) error
@@ -244,20 +245,22 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 }
 
 func (c *client) Exec(ctx context.Context, instance string, command []string) error {
+	_, err := c.ExecCapture(ctx, instance, command)
+	return err
+}
+
+func (c *client) ExecCapture(ctx context.Context, instance string, command []string) ([]byte, error) {
 	if instance == "" {
-		return fmt.Errorf("instance name is required for exec")
+		return nil, fmt.Errorf("instance name is required for exec")
 	}
 	if len(command) == 0 {
-		return fmt.Errorf("exec command cannot be empty")
+		return nil, fmt.Errorf("exec command cannot be empty")
 	}
 
 	args := []string{"exec", instance, "--"}
 	args = append(args, command...)
 
-	if _, err := c.run(ctx, args...); err != nil {
-		return err
-	}
-	return nil
+	return c.run(ctx, args...)
 }
 
 func (c *client) StartInstance(ctx context.Context, name string) error {
