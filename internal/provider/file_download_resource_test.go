@@ -250,3 +250,66 @@ func TestDirectDownloadStagesInSharedHome(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectoryDownloadPreservesPreviousCopyOnFailure(t *testing.T) {
+	for _, kind := range []string{"symlink", "truncated", "missing source", "success"} {
+		t.Run(kind, func(t *testing.T) {
+			dest := filepath.Join(t.TempDir(), "output")
+			if err := os.Mkdir(dest, 0700); err != nil {
+				t.Fatal(err)
+			}
+			old := filepath.Join(dest, "previous")
+			if err := os.WriteFile(old, []byte("backup"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			model := fileDownloadResourceModel{Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
+			var archive bytes.Buffer
+			tw := tar.NewWriter(&archive)
+			if err := tw.WriteHeader(&tar.Header{Name: "new", Typeflag: tar.TypeReg, Mode: 0600, Size: 3}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tw.Write([]byte("new")); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "symlink" {
+				if err := tw.WriteHeader(&tar.Header{Name: "latest", Typeflag: tar.TypeSymlink, Linkname: "new"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			data := archive.Bytes()
+			if kind == "truncated" {
+				data = data[:513]
+			}
+			r := &fileDownloadResource{}
+			d := r.writeDirectoryFromTar(data, dest, &model)
+			if kind == "missing source" { // Restore old contents before exercising the direct-copy failure.
+				if err := os.WriteFile(old, []byte("backup"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				d = r.copyDirectory(filepath.Join(t.TempDir(), "missing"), dest, &model)
+			}
+			if d.HasError() != (kind != "success") {
+				t.Fatal(d)
+			}
+			if kind != "success" {
+				if data, err := os.ReadFile(old); err != nil || string(data) != "backup" {
+					t.Fatalf("previous copy lost: %q %v", data, err)
+				}
+			} else {
+				if _, err := os.Stat(old); !os.IsNotExist(err) {
+					t.Fatal("old output remains")
+				}
+				if data, err := os.ReadFile(filepath.Join(dest, "new")); err != nil || string(data) != "new" {
+					t.Fatalf("new copy invalid: %q %v", data, err)
+				}
+			}
+			entries, err := os.ReadDir(filepath.Dir(dest))
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("temporary copies leaked: %v %v", entries, err)
+			}
+		})
+	}
+}
