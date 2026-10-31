@@ -66,7 +66,8 @@ func walkDirectory(root, current string, h io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if _, err := h.Write([]byte(filepath.ToSlash(rel))); err != nil {
+		// NUL cannot occur in a filename; separate names and entry kinds.
+		if _, err := fmt.Fprintf(h, "%t\x00%s\x00", entry.IsDir(), filepath.ToSlash(rel)); err != nil {
 			return err
 		}
 

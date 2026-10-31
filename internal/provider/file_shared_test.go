@@ -70,3 +70,27 @@ func TestHashDirectoryDetectsChanges(t *testing.T) {
 		t.Fatalf("expected hash to change after modifying directory contents")
 	}
 }
+
+func TestHashDirectorySeparatesEntries(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(a, "a"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a, "b"), []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b, "ab"), []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ah, err := hashDirectory(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bh, err := hashDirectory(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ah == bh {
+		t.Fatal("different directory layouts have identical hashes")
+	}
+}

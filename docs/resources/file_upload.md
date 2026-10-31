@@ -65,3 +65,5 @@ Exactly one of `source` or `content` must be provided.
 * Updates re-run `multipass transfer` whenever `content_hash` changes, mirroring how Terraform provisioners behave during apply.
 * When using `content`, data never touches disk outside of a short-lived temp file that is deleted after the transfer.
 * Destroying the resource removes the remote path via `multipass exec <instance> rm -rf -- <destination>`. Use caution when pointing `destination` at directories shared with other resources.
+
+Directory hashes include entry boundaries and types. Upgrading from the old hash format causes a one-time re-upload of directory payloads.
