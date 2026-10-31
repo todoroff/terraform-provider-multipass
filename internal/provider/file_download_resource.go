@@ -419,17 +419,32 @@ func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, wri
 		diags.AddError("Failed to prepare destination", err.Error())
 		return diags
 	}
-	tempDir, err := os.MkdirTemp(filepath.Dir(dest), ".multipass-download-*")
+	stage, err := os.MkdirTemp(filepath.Dir(dest), ".multipass-download-*")
 	if err != nil {
 		diags.AddError("Failed to stage download", err.Error())
 		return diags
 	}
-	defer os.RemoveAll(tempDir)
-	// The private parent protects staging while Mkdir applies the user's umask.
-	stage := filepath.Join(tempDir, "payload")
-	if err := os.Mkdir(stage, 0o755); err != nil {
-		diags.AddError("Failed to stage download", err.Error())
-		return diags
+	defer func() {
+		_ = os.Chmod(stage, 0o700)
+		_ = os.RemoveAll(stage)
+	}()
+	if !exists {
+		// Measure Mkdir's umask-adjusted mode without making staging public.
+		probe := filepath.Join(stage, "permissions")
+		if err := os.Mkdir(probe, 0o755); err != nil {
+			diags.AddError("Failed to prepare directory permissions", err.Error())
+			return diags
+		}
+		info, err := os.Stat(probe)
+		if err != nil {
+			diags.AddError("Failed to inspect directory permissions", err.Error())
+			return diags
+		}
+		mode = info.Mode()
+		if err := os.Remove(probe); err != nil {
+			diags.AddError("Failed to prepare directory permissions", err.Error())
+			return diags
+		}
 	}
 	diags.Append(write(stage)...)
 	if diags.HasError() {
@@ -439,12 +454,12 @@ func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, wri
 		diags.AddError("Failed to validate staged download", err.Error())
 		return diags
 	}
+	if err := os.Chmod(stage, mode); err != nil {
+		diags.AddError("Failed to set destination permissions", err.Error())
+		return diags
+	}
 	backup := ""
 	if exists {
-		if err := os.Chmod(stage, mode); err != nil {
-			diags.AddError("Failed to preserve destination permissions", err.Error())
-			return diags
-		}
 		backup, err = os.MkdirTemp(filepath.Dir(dest), ".multipass-backup-*")
 		if err == nil {
 			err = os.Remove(backup)

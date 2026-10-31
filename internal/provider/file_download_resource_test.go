@@ -347,9 +347,12 @@ func TestDirectoryDownloadPermissions(t *testing.T) {
 			t.Cleanup(func() { _ = os.Chmod(dest, 0o700) })
 			model := fileDownloadResourceModel{Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
 			d := replaceDownloadDirectory(dest, &model, func(stage string) diag.Diagnostics {
-				info, err := os.Stat(filepath.Dir(stage))
+				info, err := os.Stat(stage)
 				if err != nil || info.Mode().Perm() != 0o700 {
-					t.Fatalf("staging parent must remain private: %v %v", info, err)
+					t.Fatalf("staging must remain private: %v %v", info, err)
+				}
+				if filepath.Dir(stage) != parent {
+					t.Fatalf("staging must share the destination parent for read-only directory renames: %s", stage)
 				}
 				if err := os.WriteFile(filepath.Join(stage, "new"), []byte("data"), 0o600); err != nil {
 					t.Fatal(err)
