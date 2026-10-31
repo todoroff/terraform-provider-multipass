@@ -78,3 +78,36 @@ func TestAliasUpdateRecreatesMissingAlias(t *testing.T) {
 		t.Fatal("missing alias was not recreated")
 	}
 }
+
+func TestUploadDeleteFailureKeepsResource(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		execErr, listErr  error
+		exists, wantError bool
+	}{
+		{"permission", errors.New("permission denied"), nil, true, true},
+		{"timeout", multipasscli.ErrTimeout, errors.New("offline"), true, true},
+		{"missing command", multipasscli.ErrNotFound, nil, true, true},
+		{"absent VM", multipasscli.ErrNotFound, nil, false, false},
+		{"already absent file", nil, nil, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fileUploadResource{client: &testClient{exec: func(context.Context, string, []string) error { return tc.execErr }, listInstances: func(context.Context, bool) ([]models.Instance, error) {
+				if tc.exists {
+					return []models.Instance{{Name: "vm"}}, tc.listErr
+				}
+				return nil, tc.listErr
+			}}}
+			s := resourceSchema(r)
+			state := tfsdk.State{Schema: s, Raw: resourceValue(s, map[string]any{"id": "vm:/file", "instance": "vm", "destination": "/file"})}
+			resp := resource.DeleteResponse{State: state}
+			r.Delete(context.Background(), resource.DeleteRequest{State: state}, &resp)
+			if resp.Diagnostics.HasError() != tc.wantError {
+				t.Fatal(resp.Diagnostics)
+			}
+			if tc.wantError && resp.State.Raw.IsNull() {
+				t.Fatal("failed deletion lost state")
+			}
+		})
+	}
+}

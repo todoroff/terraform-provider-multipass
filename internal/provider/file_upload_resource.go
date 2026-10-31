@@ -321,6 +321,7 @@ func (r *fileUploadResource) Update(ctx context.Context, req resource.UpdateRequ
 
 func (r *fileUploadResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	if r.client == nil {
+		resp.Diagnostics.AddError("Client not configured", "The provider Multipass client was not configured.")
 		return
 	}
 
@@ -337,11 +338,17 @@ func (r *fileUploadResource) Delete(ctx context.Context, req resource.DeleteRequ
 	}
 
 	if err := r.client.Exec(ctx, instance, []string{"rm", "-rf", "--", dest}); err != nil {
-		if cliErr, ok := err.(*multipasscli.CLIError); ok {
-			resp.Diagnostics.AddWarning("Failed to remove remote path", cliErr.Error())
-			return
+		// CLI error text can describe a missing command, not a missing VM.
+		if instances, listErr := r.client.ListInstances(ctx, true); listErr == nil {
+			found := false
+			for _, vm := range instances {
+				found = found || vm.Name == instance
+			}
+			if !found {
+				return
+			}
 		}
-		resp.Diagnostics.AddWarning("Failed to remove remote path", err.Error())
+		resp.Diagnostics.AddError("Failed to remove remote path", err.Error())
 	}
 }
 
