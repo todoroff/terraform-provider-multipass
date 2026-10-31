@@ -15,7 +15,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	frameworkpath "github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -30,7 +29,6 @@ import (
 var (
 	_ resource.Resource                = (*fileDownloadResource)(nil)
 	_ resource.ResourceWithConfigure   = (*fileDownloadResource)(nil)
-	_ resource.ResourceWithModifyPlan  = (*fileDownloadResource)(nil)
 	_ resource.ResourceWithImportState = (*fileDownloadResource)(nil)
 )
 
@@ -157,24 +155,6 @@ func (r *fileDownloadResource) Configure(_ context.Context, req resource.Configu
 	r.client = data.client
 	r.hostOS = data.hostOS
 	r.commandTimeout = data.commandTimeout
-}
-
-func (r *fileDownloadResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
-		return
-	}
-
-	var plan fileDownloadResourceModel
-	var state fileDownloadResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	if !mapsEqual(ctx, plan.Triggers, state.Triggers) {
-		resp.RequiresReplace = append(resp.RequiresReplace, frameworkpath.Root("triggers"))
-	}
 }
 
 func (r *fileDownloadResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -684,33 +664,4 @@ func copyFileContents(src, dest string) error {
 		return err
 	}
 	return out.Close()
-}
-
-func mapsEqual(ctx context.Context, a, b types.Map) bool {
-	if a.IsNull() && b.IsNull() {
-		return true
-	}
-
-	var amap, bmap map[string]string
-	if !a.IsNull() {
-		if err := a.ElementsAs(ctx, &amap, false); err != nil {
-			return false
-		}
-	}
-	if !b.IsNull() {
-		if err := b.ElementsAs(ctx, &bmap, false); err != nil {
-			return false
-		}
-	}
-
-	if len(amap) != len(bmap) {
-		return false
-	}
-
-	for k, v := range amap {
-		if bmap[k] != v {
-			return false
-		}
-	}
-	return true
 }

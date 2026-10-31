@@ -167,3 +167,40 @@ func TestFileDownloadReadDetectsMissingChild(t *testing.T) {
 		t.Fatal("missing child must remove resource even while destination directory exists")
 	}
 }
+
+func TestDownloadTriggerReplacement(t *testing.T) {
+	for _, change := range []struct {
+		name     string
+		triggers any
+		want     bool
+	}{
+		{"same", map[string]tftypes.Value{"revision": tftypes.NewValue(tftypes.String, "one")}, false},
+		{"changed", map[string]tftypes.Value{"revision": tftypes.NewValue(tftypes.String, "two")}, true},
+		{"removed", nil, true},
+		{"unknown", tftypes.UnknownValue, true},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			ctx := context.Background()
+			s := resourceSchema(NewFileDownloadResource())
+			values := map[string]any{"id": "download", "instance": "vm", "source": "/tmp/file", "destination": "output", "recursive": false, "create_parents": true, "overwrite": true, "triggers": map[string]tftypes.Value{"revision": tftypes.NewValue(tftypes.String, "one")}}
+			prior := resourceValue(s, values)
+			values["triggers"] = change.triggers
+			next := resourceValue(s, values)
+			delete(values, "id")
+			server := providerserver.NewProtocol6(New("test")())()
+			result, err := server.PlanResourceChange(ctx, &tfprotov6.PlanResourceChangeRequest{TypeName: "multipass_file_download", PriorState: dynamicValue(t, prior), ProposedNewState: dynamicValue(t, next), Config: dynamicValue(t, resourceValue(s, values))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, d := range result.Diagnostics {
+				if d.Severity == tfprotov6.DiagnosticSeverityError {
+					t.Fatal(d)
+				}
+			}
+			if (len(result.RequiresReplace) > 0) != change.want {
+				t.Fatal(result.RequiresReplace)
+			}
+			t.Logf("replacement=%t", len(result.RequiresReplace) > 0)
+		})
+	}
+}
