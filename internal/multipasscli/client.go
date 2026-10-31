@@ -643,12 +643,14 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 	stdoutStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stdout.String(), ""))
 	stderrStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stderr.String(), ""))
 
-	if strings.Contains(stderrStr, "does not exist") || strings.Contains(stderrStr, "not found") {
+	// Guest stderr is arbitrary application output, not a daemon diagnostic.
+	guestCommand := len(args) > 0 && args[0] == "exec"
+	if !guestCommand && (strings.Contains(stderrStr, "does not exist") || strings.Contains(stderrStr, "not found")) {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, stderrStr)
 	}
 
 	// Detect Multipass CLI's own --timeout errors
-	if isTimeoutError(stderrStr) {
+	if !guestCommand && isTimeoutError(stderrStr) {
 		return nil, fmt.Errorf("%w: %s", ErrTimeout, stderrStr)
 	}
 
