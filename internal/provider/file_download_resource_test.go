@@ -4,12 +4,15 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -309,6 +312,56 @@ func TestDirectoryDownloadPreservesPreviousCopyOnFailure(t *testing.T) {
 			entries, err := os.ReadDir(filepath.Dir(dest))
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("temporary copies leaked: %v %v", entries, err)
+			}
+		})
+	}
+}
+
+func TestDirectoryDownloadPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not supported on Windows")
+	}
+	for _, existingMode := range []os.FileMode{0, 0o750, 0o700, 0o555} {
+		t.Run(fmt.Sprintf("%o", existingMode), func(t *testing.T) {
+			parent := t.TempDir()
+			dest := filepath.Join(parent, "output")
+			want := existingMode
+			if existingMode == 0 {
+				control := filepath.Join(parent, "control")
+				if err := os.Mkdir(control, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				info, err := os.Stat(control)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = info.Mode().Perm()
+			} else {
+				if err := os.Mkdir(dest, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(dest, existingMode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() { _ = os.Chmod(dest, 0o700) })
+			model := fileDownloadResourceModel{Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
+			d := replaceDownloadDirectory(dest, &model, func(stage string) diag.Diagnostics {
+				info, err := os.Stat(filepath.Dir(stage))
+				if err != nil || info.Mode().Perm() != 0o700 {
+					t.Fatalf("staging parent must remain private: %v %v", info, err)
+				}
+				if err := os.WriteFile(filepath.Join(stage, "new"), []byte("data"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return nil
+			})
+			if d.HasError() {
+				t.Fatal(d)
+			}
+			info, err := os.Stat(dest)
+			if err != nil || info.Mode().Perm() != want {
+				t.Fatalf("destination mode: %v %v; want %o", info, err, want)
 			}
 		})
 	}

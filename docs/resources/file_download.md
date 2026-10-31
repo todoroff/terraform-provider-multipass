@@ -60,3 +60,5 @@ resource "multipass_file_download" "logs" {
 On Linux/macOS, downloads stage under the Terraform user's home directory so the Multipass CLI and provider share the same path, including with Snap confinement. Staging is removed after the transfer; allow space for the downloaded payload there.
 
 Directory downloads are fully staged and validated before replacing the destination. The previous directory is moved aside until installation succeeds; failed installation attempts restore it, and any failed restoration reports the retained backup path.
+
+On POSIX hosts, new directory roots use `0755` subject to the host umask. Overwrites preserve the existing root's permission mode. Staging remains inside a private directory until installation.

@@ -403,8 +403,10 @@ func (r *fileDownloadResource) copyDirectory(src, dest string, model *fileDownlo
 func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, write func(string) diag.Diagnostics) diag.Diagnostics {
 	var diags diag.Diagnostics
 	exists := false
+	var mode os.FileMode
 	if stat, err := os.Lstat(dest); err == nil {
 		exists = true
+		mode = stat.Mode()
 		if !stat.IsDir() || !model.Overwrite.ValueBool() {
 			diags.AddError("Destination exists", fmt.Sprintf("%q must be a directory and overwrite must be true", dest))
 			return diags
@@ -417,12 +419,18 @@ func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, wri
 		diags.AddError("Failed to prepare destination", err.Error())
 		return diags
 	}
-	stage, err := os.MkdirTemp(filepath.Dir(dest), ".multipass-download-*")
+	tempDir, err := os.MkdirTemp(filepath.Dir(dest), ".multipass-download-*")
 	if err != nil {
 		diags.AddError("Failed to stage download", err.Error())
 		return diags
 	}
-	defer os.RemoveAll(stage)
+	defer os.RemoveAll(tempDir)
+	// The private parent protects staging while Mkdir applies the user's umask.
+	stage := filepath.Join(tempDir, "payload")
+	if err := os.Mkdir(stage, 0o755); err != nil {
+		diags.AddError("Failed to stage download", err.Error())
+		return diags
+	}
 	diags.Append(write(stage)...)
 	if diags.HasError() {
 		return diags
@@ -433,6 +441,10 @@ func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, wri
 	}
 	backup := ""
 	if exists {
+		if err := os.Chmod(stage, mode); err != nil {
+			diags.AddError("Failed to preserve destination permissions", err.Error())
+			return diags
+		}
 		backup, err = os.MkdirTemp(filepath.Dir(dest), ".multipass-backup-*")
 		if err == nil {
 			err = os.Remove(backup)
