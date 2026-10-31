@@ -56,3 +56,5 @@ resource "multipass_file_download" "logs" {
 
 * Destroying a file download removes only the downloaded file, including when `destination` is an existing directory. Other files in that directory are preserved. A recursive download owns and removes its destination directory.
 * Downloads run during `create`/`update`. To rerun without a configuration change, adjust `triggers`, taint the resource, or use `terraform apply -replace=multipass_file_download.example`.
+
+On Linux/macOS, downloads stage under the Terraform user's home directory so the Multipass CLI and provider share the same path, including with Snap confinement. Staging is removed after the transfer; allow space for the downloaded payload there.

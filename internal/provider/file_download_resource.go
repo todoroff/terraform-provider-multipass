@@ -335,7 +335,13 @@ func (r *fileDownloadResource) downloadDirect(ctx context.Context, model *fileDo
 		return diags
 	}
 
-	tempDir, err := os.MkdirTemp("", "multipass-file-download-direct-*")
+	// Snap's private /tmp is not shared with this provider process.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		diags.AddError("Failed to locate home directory", err.Error())
+		return diags
+	}
+	tempDir, err := os.MkdirTemp(home, "multipass-file-download-direct-*")
 	if err != nil {
 		diags.AddError("Failed to create temp directory", err.Error())
 		return diags

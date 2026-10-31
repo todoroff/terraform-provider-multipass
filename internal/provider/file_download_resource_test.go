@@ -204,3 +204,49 @@ func TestDownloadTriggerReplacement(t *testing.T) {
 		})
 	}
 }
+
+type directDownloadClient struct {
+	multipasscli.Client
+	transfer func(multipasscli.TransferOptions) error
+}
+
+func (c *directDownloadClient) Transfer(_ context.Context, opts multipasscli.TransferOptions) error {
+	return c.transfer(opts)
+}
+func TestDirectDownloadStagesInSharedHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, recursive := range []bool{false, true} {
+		var staging string
+		client := &directDownloadClient{transfer: func(opts multipasscli.TransferOptions) error {
+			staging = opts.Destination
+			if filepath.Dir(staging) != home {
+				t.Fatalf("staged outside shared home: %s", staging)
+			}
+			target := filepath.Join(staging, "payload")
+			if recursive {
+				if err := os.Mkdir(target, 0700); err != nil {
+					return err
+				}
+				target = filepath.Join(target, "file")
+			}
+			return os.WriteFile(target, []byte("data"), 0600)
+		}}
+		r := &fileDownloadResource{client: client}
+		dest := filepath.Join(t.TempDir(), "output")
+		model := fileDownloadResourceModel{Instance: types.StringValue("vm"), Source: types.StringValue("/payload"), Recursive: types.BoolValue(recursive), CreateParents: types.BoolValue(true), Overwrite: types.BoolValue(true)}
+		if d := r.downloadDirect(context.Background(), &model, dest); d.HasError() {
+			t.Fatal(d)
+		}
+		if _, err := os.Stat(staging); !os.IsNotExist(err) {
+			t.Fatalf("staging not cleaned: %v", err)
+		}
+		if recursive {
+			dest = filepath.Join(dest, "file")
+		}
+		if data, err := os.ReadFile(dest); err != nil || string(data) != "data" {
+			t.Fatalf("%q %v", data, err)
+		}
+	}
+}
