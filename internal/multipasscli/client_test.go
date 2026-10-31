@@ -2,7 +2,11 @@ package multipasscli
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,53 +19,37 @@ func TestAliasCommand_noDir(t *testing.T) {
 	}
 }
 
-func TestAliasCommand_withDir(t *testing.T) {
-	t.Parallel()
-	got := aliasCommand("ls", "/workspace")
-	want := `bash -c 'cd "/workspace" && exec ls'`
-	if got != want {
-		t.Fatalf("got  %q\nwant %q", got, want)
+func TestAliasCommandLiteralDirectory(t *testing.T) {
+	shell, err := exec.LookPath("bash")
+	if runtime.GOOS == "windows" {
+		shell = `C:\Program Files\Git\bin\bash.exe`
+		_, err = os.Stat(shell)
+	}
+	if err != nil {
+		t.Skip("bash is required for shell quoting regression")
+	}
+	for _, name := range []string{"space name", "single'quote", "$USER", "$(printf injected)", "`printf injected`"} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), name)
+			if err := os.Mkdir(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "sentinel"), []byte("literal directory"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command(shell, "--noprofile", "--norc", "-c", aliasCommand("cat 'sentinel'", filepath.ToSlash(dir))).CombinedOutput()
+			if err != nil || string(out) != "literal directory" {
+				t.Fatalf("output=%q error=%v", out, err)
+			}
+		})
+	}
+	for _, value := range []string{`double"quote`, `back\slash`, "line\nbreak", "single'quote", "$(printf injected)"} {
+		out, err := exec.Command(shell, "--noprofile", "--norc", "-c", "printf %s "+shellQuote(value)).CombinedOutput()
+		if err != nil || string(out) != value {
+			t.Fatalf("literal %q: output=%q error=%v", value, out, err)
+		}
 	}
 }
-
-func TestAliasCommand_withDirAndArgs(t *testing.T) {
-	t.Parallel()
-	got := aliasCommand("grep foo bar.txt", "/home/ubuntu/project")
-	want := `bash -c 'cd "/home/ubuntu/project" && exec grep foo bar.txt'`
-	if got != want {
-		t.Fatalf("got  %q\nwant %q", got, want)
-	}
-}
-
-func TestAliasCommand_dirWithSpaces(t *testing.T) {
-	t.Parallel()
-	got := aliasCommand("bash", "/my project")
-	want := `bash -c 'cd "/my project" && exec bash'`
-	if got != want {
-		t.Fatalf("got  %q\nwant %q", got, want)
-	}
-}
-
-func TestAliasCommand_commandWithSingleQuotes(t *testing.T) {
-	t.Parallel()
-	got := aliasCommand("grep 'foo' bar.txt", "/workspace")
-	want := `bash -c 'cd "/workspace" && exec grep '\''foo'\'' bar.txt'`
-	if got != want {
-		t.Fatalf("got  %q\nwant %q", got, want)
-	}
-}
-
-func TestAliasCommand_dirWithSingleQuotes(t *testing.T) {
-	t.Parallel()
-	// Single quote in dir is escaped with '\'' for the outer wrapper,
-	// but stays literal inside the double-quoted cd argument.
-	got := aliasCommand("ls", "/tmp/user's files")
-	want := `bash -c 'cd "/tmp/user'\''s files" && exec ls'`
-	if got != want {
-		t.Fatalf("got  %q\nwant %q", got, want)
-	}
-}
-
 func TestBuildTransferArgs_sources(t *testing.T) {
 	t.Parallel()
 	got := buildTransferArgs(TransferOptions{

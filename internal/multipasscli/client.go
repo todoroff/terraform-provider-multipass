@@ -674,19 +674,15 @@ func cloneAliases(in []models.Alias) []models.Alias {
 
 // aliasCommand returns the command string for a multipass alias. When dir is
 // non-empty the command is wrapped so it executes in that directory.
-//
-// The wrapper uses bash -c '...' (single-quoted) for the outer layer so the
-// host shell / multipass stores it literally. Inside that:
-//   - dir is double-quoted so bash handles spaces and literal single quotes
-//   - a single quote in dir or command closes the outer quoting, inserts
-//     an escaped literal quote, then reopens the outer quoting
 func aliasCommand(command, dir string) string {
 	if dir != "" {
-		escapedDir := strings.ReplaceAll(dir, "'", `'\''`)
-		escapedCmd := strings.ReplaceAll(command, "'", `'\''`)
-		return fmt.Sprintf(`bash -c 'cd "%s" && exec %s'`, escapedDir, escapedCmd)
+		return "bash -c " + shellQuote("cd -- "+shellQuote(dir)+" && exec "+command)
 	}
 	return command
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func errorsIsNotFound(err error) bool {
