@@ -44,6 +44,8 @@ For remote hosts, install the CLI on the Terraform machine, configure a reachabl
 Manages VM lifecycle. Full schema: [docs/resources/instance.md](docs/resources/instance.md)
 
 **Arguments:** `name` (required), `image`, `cpus`, `memory`, `disk`, `resize_policy`, `cloud_init_file`, `cloud_init`, `primary`, `auto_recover`, `auto_start_on_recover`, `wait_for_cloud_init`.
+
+**Availability zones (1.17+):** Optional/computed `zone` selects placement; changing an explicit zone forces recreation regardless of resize policy. Omission lets Multipass choose on creation and retains placement afterward. Refresh/import discover the actual zone; older versions return null. Explicit placement and zone discovery require both client and daemon >= 1.17. Unavailable instances remain tracked with last known allocations and are not auto-recovered; re-enable their zone before updates. See [the 1.17 guide](docs/guides/multipass-1.17.md).
 **Nested blocks:** `networks` (name, mode, mac), `mounts` (host_path, instance_path, read_only), `timeouts`.
 **Computed:** `id`, `ipv4`, `state`, `release`, `image_release`, `snapshot_count`, `last_updated`.
 
@@ -186,9 +188,15 @@ resource "multipass_file_download" "logs" {
 
 ## Data Sources
 
+### multipass_zones
+
+Lists zones, sorted by name, with `name`, `available` (boolean), and `subnet`. Optional `name` is an exact filter. Requires client and daemon >= 1.17. Read-only; does not create or toggle zones. Full schema: [docs/data-sources/zones.md](docs/data-sources/zones.md).
+
 ### multipass_images
 
 Enumerate launchable images/blueprints. Full schema: [docs/data-sources/images.md](docs/data-sources/images.md)
+
+Multipass 1.17 adds Debian/Fedora images and removes blueprints. The existing image argument accepts their aliases; `kind = "blueprint"` returns no entries on 1.17 while remaining supported on older versions.
 
 **Filters (all optional, combinable):** `name` (exact), `alias`, `kind` (`"image"` / `"blueprint"`), `query` (substring).
 **Returns:** list `images` with `name`, `aliases`, `os`, `release`, `remote`, `version`, `description`, `kind`.
@@ -216,6 +224,8 @@ data "multipass_networks" "all" {}
 Read-only inspection of an existing instance. Full schema: [docs/data-sources/instance.md](docs/data-sources/instance.md)
 
 **Required:** `name`.
+
+Computed `zone` reports placement on 1.17+ and is null on older versions. During zone outages, daemon metadata remains readable and guest metrics are null with a warning.
 **Returns:** `state`, `release`, `image_release`, `ipv4`, `cpu_count`, `memory_total_bytes`, `memory_used_bytes`, `disk_total_bytes`, `disk_used_bytes`, `snapshot_count`, `last_updated`.
 
 ```hcl
@@ -274,6 +284,9 @@ Use the `triggers` argument with a changing value (e.g. `multipass_instance.app.
 If soft-deleted outside Terraform, set `auto_recover = true` to automatically recover. Pair with `auto_start_on_recover = true` to also start it.
 
 ## Examples
+
+- [availability-zones/](examples/availability-zones/main.tf) — fixed zone placement (1.17+).
+- [multi-distro/](examples/multi-distro/main.tf) — Debian and Fedora (1.17+).
 
 See [`examples/`](examples/) for complete working configurations:
 - `basic/` — minimal instance + alias

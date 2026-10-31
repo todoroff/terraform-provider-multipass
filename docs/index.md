@@ -50,6 +50,7 @@ Use `server_address` and Terraform provider aliases to manage multiple hosts. Th
 
 ## Data Sources
 
+- [`multipass_zones`](data-sources/zones.md) – List availability zones, availability, and subnets (CLI and daemon >= 1.17). See the [1.17 guide](guides/multipass-1.17.md).
 - [`multipass_images`](data-sources/images.md) – Enumerate launchable images/blueprints.
 - [`multipass_networks`](data-sources/networks.md) – List host bridge targets.
 - [`multipass_instance`](data-sources/instance.md) – Inspect existing Multipass instances.

@@ -74,6 +74,7 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | Name              | Type    | Required | Description |
 | ----------------- | ------- | -------- | ----------- |
 | `name`            | String  | Yes      | Multipass instance name. Forces recreation. |
+| `zone`            | String  | No       | Availability-zone name. Requires CLI and daemon >= 1.17. Omission chooses automatically at creation and retains placement afterward. Explicit changes force recreation. |
 | `image`           | String  | No       | Image alias/name. Defaults to provider `default_image` or `lts`. Forces recreation. |
 | `cpus`            | Number  | No       | Positive virtual CPU count. Defaults to 1 at creation; omission retains the current allocation. Changes follow `resize_policy`. |
 | `memory`          | String  | No       | Memory allocation (`1G`, `512M`, or bytes). Defaults to `1G` at creation; omission retains the current allocation. Changes follow `resize_policy`. |
@@ -90,6 +91,10 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | `timeouts`        | Block   | No       | Per-operation timeouts (`create`, `read`, `update`, `delete`). Accepts duration strings like `"20m"` or `"1h"`. Falls back to the provider `command_timeout` when not set. |
 
 ## Behavior
+
+### Availability zones
+
+Zone placement is read back during refresh and import. Older versions return null. Adding this attribute to existing state does not replace a VM unless explicitly configured placement differs. An `Unavailable` instance remains managed and retains its last known allocations; auto-recovery does not apply to zone outages. Re-enable the zone before updating the instance. See the [1.17 guide](../guides/multipass-1.17.md).
 
 ### Resizing
 

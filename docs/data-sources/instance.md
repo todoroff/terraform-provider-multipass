@@ -7,6 +7,8 @@ description: "Inspect an existing Multipass instance without managing its lifecy
 
 Returns information about an existing Multipass instance without managing it.
 
+If a zone is unavailable, daemon metadata remains readable and guest metrics are null with a warning. See the [1.17 guide](../guides/multipass-1.17.md).
+
 ## Example Usage
 
 ```hcl
@@ -30,6 +32,7 @@ output "primary_state" {
 | Attribute            | Description |
 | -------------------- | ----------- |
 | `state`              | Instance state (Running, Stopped, Deleted...). |
+| `zone`               | Availability-zone name; null on older Multipass versions. |
 | `release`            | OS release running inside the VM. |
 | `image_release`      | Release reported by the source image. |
 | `ipv4`               | List of IPv4 addresses. |

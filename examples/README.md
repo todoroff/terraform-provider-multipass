@@ -2,6 +2,8 @@
 
 This provider ships with progressively complex Terraform examples. Each scenario highlights different Multipass capabilities so you can mix-and-match patterns in your own projects.
 
+Multipass 1.17 examples: [availability zones](availability-zones/main.tf) places VMs in a fixed set of zones; [multiple distributions](multi-distro/main.tf) launches Debian and Fedora. Zone support requires a provider build containing this feature. See the [1.17 guide](../docs/guides/multipass-1.17.md).
+
 ## 1. `basic/`
 Minimal single instance showing required provider configuration and a simple alias. Good starting point for smoke tests.
 
