@@ -140,11 +140,11 @@ Import: `terraform import multipass_snapshot.backup my-app.pre-upgrade`
 Transfer files or inline content into an instance. Full schema: [docs/resources/file_upload.md](docs/resources/file_upload.md)
 
 **Arguments:** `instance` (required), `destination` (required), `source` or `content` (exactly one required), `recursive`, `create_parents`.
-**Computed:** `content_hash` (SHA256, drives update detection).
+**Computed:** `content_hash` (SHA256, drives update detection), `resolved_destination`, `directory`.
 
 - Changing `instance` or `destination` forces recreation.
 - Updates re-transfer when `content_hash` changes.
-- Destroy removes the remote path (`rm -rf`).
+- Destroy removes only the recorded owned path; files use nonrecursive deletion. Older recursive state remains usable without re-import; ambiguous remote files are retained on destroy with a warning until a successful update records ownership. See the upload guide.
 
 ```hcl
 resource "multipass_file_upload" "config" {

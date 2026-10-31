@@ -15,7 +15,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	frameworkpath "github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -30,7 +29,6 @@ import (
 var (
 	_ resource.Resource                = (*fileDownloadResource)(nil)
 	_ resource.ResourceWithConfigure   = (*fileDownloadResource)(nil)
-	_ resource.ResourceWithModifyPlan  = (*fileDownloadResource)(nil)
 	_ resource.ResourceWithImportState = (*fileDownloadResource)(nil)
 )
 
@@ -159,24 +157,6 @@ func (r *fileDownloadResource) Configure(_ context.Context, req resource.Configu
 	r.commandTimeout = data.commandTimeout
 }
 
-func (r *fileDownloadResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
-		return
-	}
-
-	var plan fileDownloadResourceModel
-	var state fileDownloadResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	if !mapsEqual(ctx, plan.Triggers, state.Triggers) {
-		resp.RequiresReplace = append(resp.RequiresReplace, frameworkpath.Root("triggers"))
-	}
-}
-
 func (r *fileDownloadResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Client not configured", "The provider Multipass client was not configured.")
@@ -197,8 +177,8 @@ func (r *fileDownloadResource) Create(ctx context.Context, req resource.CreateRe
 	ctx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 
-	if downloadDiags := r.downloadAndWrite(ctx, &plan); downloadDiags.HasError() {
-		resp.Diagnostics.Append(downloadDiags...)
+	resp.Diagnostics.Append(r.downloadAndWrite(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -266,8 +246,8 @@ func (r *fileDownloadResource) Update(ctx context.Context, req resource.UpdateRe
 	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
 	defer cancel()
 
-	if downloadDiags := r.downloadAndWrite(ctx, &plan); downloadDiags.HasError() {
-		resp.Diagnostics.Append(downloadDiags...)
+	resp.Diagnostics.Append(r.downloadAndWrite(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -355,7 +335,13 @@ func (r *fileDownloadResource) downloadDirect(ctx context.Context, model *fileDo
 		return diags
 	}
 
-	tempDir, err := os.MkdirTemp("", "multipass-file-download-direct-*")
+	// Snap's private /tmp is not shared with this provider process.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		diags.AddError("Failed to locate home directory", err.Error())
+		return diags
+	}
+	tempDir, err := os.MkdirTemp(home, "multipass-file-download-direct-*")
 	if err != nil {
 		diags.AddError("Failed to create temp directory", err.Error())
 		return diags
@@ -404,37 +390,104 @@ func (r *fileDownloadResource) downloadDirect(ctx context.Context, model *fileDo
 }
 
 func (r *fileDownloadResource) copyDirectory(src, dest string, model *fileDownloadResourceModel) diag.Diagnostics {
+	return replaceDownloadDirectory(dest, model, func(stage string) diag.Diagnostics {
+		var diags diag.Diagnostics
+		if err := copyDirContents(src, stage); err != nil {
+			diags.AddError("Failed to copy directory", err.Error())
+		}
+		return diags
+	})
+}
+
+// Finish and validate the new tree before moving the previous copy aside.
+func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, write func(string) diag.Diagnostics) diag.Diagnostics {
 	var diags diag.Diagnostics
-
-	if stat, err := os.Stat(dest); err == nil {
-		if !stat.IsDir() {
-			diags.AddError("Destination exists", fmt.Sprintf("%q exists and is not a directory", dest))
+	exists := false
+	var mode os.FileMode
+	if stat, err := os.Lstat(dest); err == nil {
+		exists = true
+		mode = stat.Mode()
+		if !stat.IsDir() || !model.Overwrite.ValueBool() {
+			diags.AddError("Destination exists", fmt.Sprintf("%q must be a directory and overwrite must be true", dest))
 			return diags
 		}
-		if model.Overwrite.ValueBool() {
-			if err := os.RemoveAll(dest); err != nil {
-				diags.AddError("Failed to clean destination", err.Error())
-				return diags
-			}
-		} else {
-			diags.AddError("Destination exists", fmt.Sprintf("Directory %q already exists and overwrite=false", dest))
-			return diags
-		}
+	} else if !os.IsNotExist(err) {
+		diags.AddError("Failed to inspect destination", err.Error())
+		return diags
 	}
-
 	if err := ensureParentDir(dest, model.CreateParents.ValueBool()); err != nil {
 		diags.AddError("Failed to prepare destination", err.Error())
 		return diags
 	}
-
-	if err := copyDirContents(src, dest); err != nil {
-		diags.AddError("Failed to copy directory", err.Error())
+	stage, err := os.MkdirTemp(filepath.Dir(dest), ".multipass-download-*")
+	if err != nil {
+		diags.AddError("Failed to stage download", err.Error())
 		return diags
 	}
-
+	defer func() {
+		_ = os.Chmod(stage, 0o700)
+		_ = os.RemoveAll(stage)
+	}()
+	if !exists {
+		// Measure Mkdir's umask-adjusted mode without making staging public.
+		probe := filepath.Join(stage, "permissions")
+		if err := os.Mkdir(probe, 0o755); err != nil {
+			diags.AddError("Failed to prepare directory permissions", err.Error())
+			return diags
+		}
+		info, err := os.Stat(probe)
+		if err != nil {
+			diags.AddError("Failed to inspect directory permissions", err.Error())
+			return diags
+		}
+		mode = info.Mode()
+		if err := os.Remove(probe); err != nil {
+			diags.AddError("Failed to prepare directory permissions", err.Error())
+			return diags
+		}
+	}
+	diags.Append(write(stage)...)
+	if diags.HasError() {
+		return diags
+	}
+	if _, err := hashDirectory(stage); err != nil {
+		diags.AddError("Failed to validate staged download", err.Error())
+		return diags
+	}
+	if err := os.Chmod(stage, mode); err != nil {
+		diags.AddError("Failed to set destination permissions", err.Error())
+		return diags
+	}
+	backup := ""
+	if exists {
+		backup, err = os.MkdirTemp(filepath.Dir(dest), ".multipass-backup-*")
+		if err == nil {
+			err = os.Remove(backup)
+		}
+		if err == nil {
+			err = os.Rename(dest, backup)
+		}
+		if err != nil {
+			diags.AddError("Failed to preserve previous download", err.Error())
+			return diags
+		}
+	}
+	if err := os.Rename(stage, dest); err != nil {
+		diags.AddError("Failed to install download", err.Error())
+		if backup != "" {
+			if restoreErr := os.Rename(backup, dest); restoreErr != nil {
+				diags.AddError("Failed to restore previous download", fmt.Sprintf("Previous copy remains at %q: %v", backup, restoreErr))
+			}
+		}
+		return diags
+	}
+	if backup != "" {
+		if err := os.RemoveAll(backup); err != nil {
+			diags.AddWarning("Previous download retained", fmt.Sprintf("New download installed, but old copy remains at %q: %v", backup, err))
+		}
+	}
 	return diags
 }
-
 func (r *fileDownloadResource) downloadWithTar(ctx context.Context, model *fileDownloadResourceModel, dest string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
@@ -553,29 +606,11 @@ func (r *fileDownloadResource) writeFileBytes(data []byte, dest string, model *f
 }
 
 func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, model *fileDownloadResourceModel) diag.Diagnostics {
+	return replaceDownloadDirectory(dest, model, func(stage string) diag.Diagnostics { return extractDownloadTar(data, stage) })
+}
+
+func extractDownloadTar(data []byte, dest string) diag.Diagnostics {
 	var diags diag.Diagnostics
-
-	if stat, err := os.Stat(dest); err == nil {
-		if !stat.IsDir() {
-			diags.AddError("Destination exists", fmt.Sprintf("%q exists and is not a directory", dest))
-			return diags
-		}
-		if model.Overwrite.ValueBool() {
-			if err := os.RemoveAll(dest); err != nil {
-				diags.AddError("Failed to clean destination", err.Error())
-				return diags
-			}
-		} else {
-			diags.AddError("Destination exists", fmt.Sprintf("Directory %q already exists and overwrite=false", dest))
-			return diags
-		}
-	}
-
-	if err := ensureParentDir(dest, model.CreateParents.ValueBool()); err != nil {
-		diags.AddError("Failed to prepare destination", err.Error())
-		return diags
-	}
-
 	tr := tar.NewReader(bytes.NewReader(data))
 
 	for {
@@ -615,7 +650,10 @@ func (r *fileDownloadResource) writeDirectoryFromTar(data []byte, dest string, m
 				diags.AddError("Failed to extract file", err.Error())
 				return diags
 			}
-			out.Close()
+			if err := out.Close(); err != nil {
+				diags.AddError("Failed to close extracted file", err.Error())
+				return diags
+			}
 		default:
 			diags.AddError("Unsupported archive entry", fmt.Sprintf("Entry %q has unsupported type %d", hdr.Name, hdr.Typeflag))
 			return diags
@@ -684,33 +722,4 @@ func copyFileContents(src, dest string) error {
 		return err
 	}
 	return out.Close()
-}
-
-func mapsEqual(ctx context.Context, a, b types.Map) bool {
-	if a.IsNull() && b.IsNull() {
-		return true
-	}
-
-	var amap, bmap map[string]string
-	if !a.IsNull() {
-		if err := a.ElementsAs(ctx, &amap, false); err != nil {
-			return false
-		}
-	}
-	if !b.IsNull() {
-		if err := b.ElementsAs(ctx, &bmap, false); err != nil {
-			return false
-		}
-	}
-
-	if len(amap) != len(bmap) {
-		return false
-	}
-
-	for k, v := range amap {
-		if bmap[k] != v {
-			return false
-		}
-	}
-	return true
 }

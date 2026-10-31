@@ -28,6 +28,7 @@ type Client interface {
 	SetInstanceResource(ctx context.Context, name string, setting ResourceSetting, value uint64) error
 	LaunchInstance(ctx context.Context, opts models.LaunchOptions) error
 	Exec(ctx context.Context, instance string, command []string) error
+	ExecCapture(ctx context.Context, instance string, command []string) ([]byte, error)
 	StartInstance(ctx context.Context, name string) error
 	StopInstance(ctx context.Context, name string, force bool) error
 	SuspendInstance(ctx context.Context, name string) error
@@ -38,6 +39,7 @@ type Client interface {
 	ListImages(ctx context.Context, refresh bool) ([]models.Image, error)
 	ListNetworks(ctx context.Context, refresh bool) ([]models.Network, error)
 	ListAliases(ctx context.Context, refresh bool) ([]models.Alias, error)
+	CurrentAliasContext(ctx context.Context) (string, error)
 	CreateAlias(ctx context.Context, alias models.Alias) error
 	DeleteAlias(ctx context.Context, name string) error
 	ListSnapshots(ctx context.Context, instance string) ([]models.Snapshot, error)
@@ -243,20 +245,22 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 }
 
 func (c *client) Exec(ctx context.Context, instance string, command []string) error {
+	_, err := c.ExecCapture(ctx, instance, command)
+	return err
+}
+
+func (c *client) ExecCapture(ctx context.Context, instance string, command []string) ([]byte, error) {
 	if instance == "" {
-		return fmt.Errorf("instance name is required for exec")
+		return nil, fmt.Errorf("instance name is required for exec")
 	}
 	if len(command) == 0 {
-		return fmt.Errorf("exec command cannot be empty")
+		return nil, fmt.Errorf("exec command cannot be empty")
 	}
 
 	args := []string{"exec", instance, "--"}
 	args = append(args, command...)
 
-	if _, err := c.run(ctx, args...); err != nil {
-		return err
-	}
-	return nil
+	return c.run(ctx, args...)
 }
 
 func (c *client) StartInstance(ctx context.Context, name string) error {
@@ -378,6 +382,15 @@ func (c *client) CreateAlias(ctx context.Context, alias models.Alias) error {
 	if alias.Name == "" || alias.Instance == "" || alias.Command == "" {
 		return fmt.Errorf("alias requires name, instance, and command")
 	}
+	if alias.Context != "" {
+		current, err := c.CurrentAliasContext(ctx)
+		if err != nil {
+			return err
+		}
+		if current != alias.Context {
+			return fmt.Errorf("select alias context %q with multipass prefer before creating or updating this alias (current context: %q)", alias.Context, current)
+		}
+	}
 	args := []string{"alias", "--no-map-working-directory"}
 
 	command := aliasCommand(alias.Command, alias.WorkingDirectory)
@@ -390,6 +403,17 @@ func (c *client) CreateAlias(ctx context.Context, alias models.Alias) error {
 	}
 	c.invalidateAliases()
 	return nil
+}
+
+func (c *client) CurrentAliasContext(ctx context.Context) (string, error) {
+	var payload aliasesResponse
+	if err := c.runJSON(ctx, &payload, "aliases"); err != nil {
+		return "", err
+	}
+	if payload.ActiveContext == "" {
+		return "", fmt.Errorf("multipass did not report its active alias context")
+	}
+	return payload.ActiveContext, nil
 }
 
 func (c *client) DeleteAlias(ctx context.Context, name string) error {
@@ -674,19 +698,15 @@ func cloneAliases(in []models.Alias) []models.Alias {
 
 // aliasCommand returns the command string for a multipass alias. When dir is
 // non-empty the command is wrapped so it executes in that directory.
-//
-// The wrapper uses bash -c '...' (single-quoted) for the outer layer so the
-// host shell / multipass stores it literally. Inside that:
-//   - dir is double-quoted so bash handles spaces and literal single quotes
-//   - a single quote in dir or command closes the outer quoting, inserts
-//     an escaped literal quote, then reopens the outer quoting
 func aliasCommand(command, dir string) string {
 	if dir != "" {
-		escapedDir := strings.ReplaceAll(dir, "'", `'\''`)
-		escapedCmd := strings.ReplaceAll(command, "'", `'\''`)
-		return fmt.Sprintf(`bash -c 'cd "%s" && exec %s'`, escapedDir, escapedCmd)
+		return "bash -c " + shellQuote("cd -- "+shellQuote(dir)+" && exec "+command)
 	}
 	return command
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func errorsIsNotFound(err error) bool {

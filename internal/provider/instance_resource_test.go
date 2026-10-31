@@ -136,3 +136,31 @@ func TestInstanceReplacementPlan(t *testing.T) {
 		})
 	}
 }
+
+func TestEmptyInstanceNameRejectedBeforeLaunch(t *testing.T) {
+	ctx := context.Background()
+	r := &instanceResource{client: &testClient{}, commandTimeout: time.Second}
+	s := resourceSchema(r)
+	for _, name := range []any{"", tftypes.UnknownValue} {
+		values := map[string]any{"name": name, "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}}
+		if name == "" {
+			server := providerserver.NewProtocol6(New("test")())()
+			v, err := server.ValidateResourceConfig(ctx, &tfprotov6.ValidateResourceConfigRequest{TypeName: "multipass_instance", Config: dynamicValue(t, resourceValue(s, values))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, d := range v.Diagnostics {
+				found = found || d.Severity == tfprotov6.DiagnosticSeverityError
+			}
+			if !found {
+				t.Fatal("empty name accepted")
+			}
+		}
+		resp := resource.CreateResponse{State: tfsdk.State{Schema: s}}
+		r.Create(ctx, resource.CreateRequest{Plan: tfsdk.Plan{Schema: s, Raw: resourceValue(s, values)}}, &resp)
+		if !resp.Diagnostics.HasError() {
+			t.Fatal("invalid name reached launch")
+		}
+	}
+}
