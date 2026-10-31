@@ -3,12 +3,14 @@ package provider
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/todoroff/terraform-provider-multipass/internal/models"
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
@@ -23,10 +25,12 @@ func NewInstanceDataSource() datasource.DataSource {
 }
 
 type instanceDataSource struct {
-	client multipasscli.Client
+	versions models.VersionInfo
+	client   multipasscli.Client
 }
 
 type instanceDataSourceModel struct {
+	Zone          types.String `tfsdk:"zone"`
 	Name          types.String `tfsdk:"name"`
 	State         types.String `tfsdk:"state"`
 	Release       types.String `tfsdk:"release"`
@@ -49,6 +53,7 @@ func (d *instanceDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 	resp.Schema = schema.Schema{
 		Description: "Reads an existing Multipass instance.",
 		Attributes: map[string]schema.Attribute{
+			"zone": schema.StringAttribute{Computed: true, Description: "Availability zone; null on older Multipass versions."},
 			"name": schema.StringAttribute{
 				Required:    true,
 				Description: "Instance name to inspect.",
@@ -97,6 +102,7 @@ func (d *instanceDataSource) Configure(_ context.Context, req datasource.Configu
 	}
 	data := req.ProviderData.(providerData)
 	d.client = data.client
+	d.versions = data.versions
 }
 
 func (d *instanceDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
@@ -112,6 +118,11 @@ func (d *instanceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	}
 
 	instance, err := d.client.GetInstance(ctx, config.Name.ValueString())
+	if err != nil && multipasscli.RequireZones(d.versions) == nil {
+		if unavailable := unavailableInstance(ctx, d.client, config.Name.ValueString()); unavailable != nil {
+			instance, err = unavailable, nil
+		}
+	}
 	if err != nil {
 		if errors.Is(err, multipasscli.ErrNotFound) {
 			resp.Diagnostics.AddError("Instance not found", "The requested Multipass instance does not exist.")
@@ -125,6 +136,7 @@ func (d *instanceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	resp.Diagnostics.Append(diag...)
 
 	state := instanceDataSourceModel{
+		Zone:          nullableZone(instance.Zone),
 		Name:          types.StringValue(instance.Name),
 		State:         types.StringValue(instance.State),
 		Release:       types.StringValue(instance.Release),
@@ -137,6 +149,12 @@ func (d *instanceDataSource) Read(ctx context.Context, req datasource.ReadReques
 		DiskUsed:      types.Int64Value(int64(instance.DiskUsed)),
 		SnapshotCount: types.Int64Value(int64(instance.SnapshotCount)),
 		LastUpdated:   types.StringValue(instance.LastUpdated.UTC().Format(time.RFC3339)),
+	}
+	if strings.EqualFold(instance.State, "Unavailable") {
+		state.ImageRelease = types.StringNull()
+		state.CPUCount, state.MemoryTotal, state.MemoryUsed = types.Int64Null(), types.Int64Null(), types.Int64Null()
+		state.DiskTotal, state.DiskUsed, state.SnapshotCount = types.Int64Null(), types.Int64Null(), types.Int64Null()
+		resp.Diagnostics.AddWarning("Instance zone unavailable", "Guest metrics cannot be refreshed until the zone is re-enabled.")
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)

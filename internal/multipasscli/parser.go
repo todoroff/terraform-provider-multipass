@@ -10,19 +10,16 @@ import (
 	"github.com/todoroff/terraform-provider-multipass/internal/models"
 )
 
-type versionResponse struct {
-	Multipass string `json:"multipass"`
-}
-
 type listResponse struct {
 	List []listEntry `json:"list"`
 }
 
 type listEntry struct {
-	Name    string   `json:"name"`
-	State   string   `json:"state"`
-	Release string   `json:"release"`
-	IPv4    []string `json:"ipv4"`
+	Zone    *models.Zone `json:"zone"`
+	Name    string       `json:"name"`
+	State   string       `json:"state"`
+	Release string       `json:"release"`
+	IPv4    []string     `json:"ipv4"`
 }
 
 func (r listResponse) toModel() []models.Instance {
@@ -30,6 +27,7 @@ func (r listResponse) toModel() []models.Instance {
 	out := make([]models.Instance, 0, len(r.List))
 	for _, entry := range r.List {
 		out = append(out, models.Instance{
+			Zone:        zoneName(entry.Zone),
 			Name:        entry.Name,
 			State:       entry.State,
 			Release:     entry.Release,
@@ -45,6 +43,7 @@ type infoResponse struct {
 }
 
 type infoEntry struct {
+	Zone          *models.Zone          `json:"zone"`
 	CPUCount      string                `json:"cpu_count"`
 	Disks         map[string]diskEntry  `json:"disks"`
 	ImageHash     string                `json:"image_hash"`
@@ -109,6 +108,7 @@ func (r infoResponse) toModel(name string) (*models.Instance, error) {
 	})
 
 	return &models.Instance{
+		Zone:          zoneName(entry.Zone),
 		Name:          name,
 		State:         entry.State,
 		Release:       entry.Release,
@@ -125,6 +125,13 @@ func (r infoResponse) toModel(name string) (*models.Instance, error) {
 		Mounts:        mounts,
 		LastUpdated:   time.Now(),
 	}, nil
+}
+
+func zoneName(zone *models.Zone) string {
+	if zone == nil {
+		return ""
+	}
+	return zone.Name
 }
 
 type findResponse struct {

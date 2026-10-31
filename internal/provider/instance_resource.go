@@ -43,6 +43,7 @@ func NewInstanceResource() resource.Resource {
 }
 
 type instanceResource struct {
+	versions       models.VersionInfo
 	client         multipasscli.Client
 	defaultImage   string
 	commandTimeout time.Duration
@@ -56,6 +57,12 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 	resp.Schema = schema.Schema{
 		Description: "Manages Canonical Multipass instances.",
 		Attributes: map[string]schema.Attribute{
+			"zone": schema.StringAttribute{
+				Optional: true, Computed: true,
+				Description:   "Availability zone (Multipass client and daemon >= 1.17). Omission lets Multipass choose on creation and retains placement afterward. Changing explicit placement replaces the VM.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown(), stringplanmodifier.RequiresReplaceIfConfigured()},
+				Validators:    []validator.String{stringvalidator.RegexMatches(zoneNamePattern, "must be non-empty and contain no whitespace or NUL characters")},
+			},
 			"id": schema.StringAttribute{
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
@@ -243,6 +250,7 @@ func (r *instanceResource) Configure(_ context.Context, req resource.ConfigureRe
 
 	data := req.ProviderData.(providerData)
 	r.client = data.client
+	r.versions = data.versions
 	r.defaultImage = data.defaultImage
 	r.commandTimeout = data.commandTimeout
 }
@@ -261,6 +269,16 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	if !hasStringValue(plan.Name) {
 		resp.Diagnostics.AddAttributeError(path.Root("name"), "Invalid instance name", "Instance name must be known and non-empty before launch.")
 		return
+	}
+	if !plan.Zone.IsNull() && !plan.Zone.IsUnknown() {
+		if !zoneNamePattern.MatchString(plan.Zone.ValueString()) {
+			resp.Diagnostics.AddAttributeError(path.Root("zone"), "Invalid availability zone", "Zone must be non-empty and contain no whitespace or NUL characters.")
+			return
+		}
+		if err := multipasscli.RequireZones(r.versions); err != nil {
+			resp.Diagnostics.AddAttributeError(path.Root("zone"), "Availability zones unsupported", err.Error())
+			return
+		}
 	}
 
 	createTimeout, diags := plan.Timeouts.Create(ctx, r.commandTimeout)
@@ -291,6 +309,7 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 	opts := models.LaunchOptions{
+		Zone:            plan.Zone.ValueString(),
 		Name:            plan.Name.ValueString(),
 		Image:           r.resolveImage(plan.Image),
 		CPUs:            valueOrDefaultInt(plan.CPUs, 1),
@@ -349,6 +368,9 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	// subsequently fails. Resolve computed launch defaults and initialize remote
 	// metadata so a failed refresh cannot leave unknown values in saved state.
 	plan.ID = types.StringValue(opts.Name)
+	if plan.Zone.IsUnknown() {
+		plan.Zone = types.StringNull()
+	}
 	plan.CPUs = types.Int64Value(int64(opts.CPUs))
 	plan.Memory = types.StringValue(launchMemory)
 	plan.Disk = types.StringValue(launchDisk)
@@ -406,6 +428,11 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	name := state.Name.ValueString()
 	instance, err := r.client.GetInstance(ctx, name)
+	if err != nil && multipasscli.RequireZones(r.versions) == nil {
+		if unavailable := unavailableInstance(ctx, r.client, name); unavailable != nil {
+			instance, err = unavailable, nil
+		}
+	}
 
 	// If the instance is missing and auto_recover is enabled, attempt a recover.
 	if errors.Is(err, multipasscli.ErrNotFound) && state.AutoRecover.ValueBool() {
@@ -474,7 +501,11 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// Ensure id is always set — important after import where only name is populated.
 	state.ID = types.StringValue(name)
 	resp.Diagnostics.Append(applyInstanceToModel(ctx, instance, &state)...)
-	resp.Diagnostics.Append(r.refreshAllocations(ctx, name, &state)...)
+	if strings.EqualFold(instance.State, "Unavailable") {
+		resp.Diagnostics.AddWarning("Instance zone unavailable", "Retaining the instance and its last known allocations until its zone is re-enabled.")
+	} else {
+		resp.Diagnostics.Append(r.refreshAllocations(ctx, name, &state)...)
+	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -529,6 +560,18 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 			resp.Diagnostics.Append(resp.State.Set(requestCtx, &state)...)
 		}
 	}()
+	if multipasscli.RequireZones(r.versions) == nil {
+		instance, err := r.getInstanceFromList(ctx, plan.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to read instance power state", err.Error())
+			return
+		}
+		if strings.EqualFold(instance.State, "Unavailable") {
+			state.State = types.StringValue(instance.State)
+			resp.Diagnostics.AddError("Instance zone unavailable", "Re-enable the zone before updating this instance.")
+			return
+		}
+	}
 	resp.Diagnostics.Append(r.resizeInstance(requestCtx, ctx, &plan, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -628,7 +671,9 @@ func (r *instanceResource) refreshState(ctx context.Context, name string, model 
 	model.ID = types.StringValue(name)
 	model.Name = types.StringValue(name)
 	diags.Append(applyInstanceToModel(ctx, instance, model)...)
-	diags.Append(r.refreshAllocations(ctx, name, model)...)
+	if !strings.EqualFold(instance.State, "Unavailable") {
+		diags.Append(r.refreshAllocations(ctx, name, model)...)
+	}
 	return diags
 }
 
@@ -650,6 +695,10 @@ func applyInstanceToModel(ctx context.Context, instance *models.Instance, model 
 	var diags diag.Diagnostics
 
 	model.State = types.StringValue(instance.State)
+	model.Zone = nullableZone(instance.Zone)
+	if strings.EqualFold(instance.State, "Unavailable") {
+		return diags
+	}
 	model.Release = types.StringValue(instance.Release)
 	model.ImageRelease = types.StringValue(instance.ImageRelease)
 	model.SnapshotCount = types.Int64Value(int64(instance.SnapshotCount))
@@ -681,6 +730,7 @@ type mountConfigModel struct {
 }
 
 type instanceResourceModel struct {
+	Zone               types.String         `tfsdk:"zone"`
 	ID                 types.String         `tfsdk:"id"`
 	Name               types.String         `tfsdk:"name"`
 	Image              types.String         `tfsdk:"image"`

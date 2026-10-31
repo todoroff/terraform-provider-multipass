@@ -21,7 +21,8 @@ var ansiRegex = regexp.MustCompile(`(\x1b\[[0-9;]*[A-Za-z]|\r\n|\r)`)
 
 // Client exposes typed helpers for interacting with the Multipass CLI.
 type Client interface {
-	Version(ctx context.Context) (string, error)
+	Version(ctx context.Context) (models.VersionInfo, error)
+	ListZones(ctx context.Context) ([]models.Zone, error)
 	ListInstances(ctx context.Context, refresh bool) ([]models.Instance, error)
 	GetInstance(ctx context.Context, name string) (*models.Instance, error)
 	GetInstanceResources(ctx context.Context, name string) (models.InstanceResources, error)
@@ -117,12 +118,12 @@ func NewClient(ctx context.Context, cfg Config) (Client, error) {
 	}, nil
 }
 
-func (c *client) Version(ctx context.Context) (string, error) {
-	var payload versionResponse
+func (c *client) Version(ctx context.Context) (models.VersionInfo, error) {
+	var payload models.VersionInfo
 	if err := c.runJSON(ctx, &payload, "version"); err != nil {
-		return "", err
+		return payload, err
 	}
-	return payload.Multipass, nil
+	return payload, nil
 }
 
 func (c *client) ListInstances(ctx context.Context, refresh bool) ([]models.Instance, error) {
@@ -175,6 +176,9 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 	}
 
 	args := []string{"launch"}
+	if opts.Zone != "" {
+		args = append(args, "--zone", opts.Zone)
+	}
 	if opts.Name != "" {
 		args = append(args, "--name", opts.Name)
 	}
