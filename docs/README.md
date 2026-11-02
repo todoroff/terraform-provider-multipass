@@ -26,12 +26,15 @@ Use `server_address = "host:50051"` to select a remote daemon. The [remote-host 
 
 ## Data Sources
 
+- [`multipass_zones`](data-sources/zones.md) – list availability zones, availability, and subnets (CLI and daemon >= 1.17).
 - [`multipass_images`](data-sources/images.md) – enumerate launchable images/blueprints.
 - [`multipass_networks`](data-sources/networks.md) – list host bridge targets.
 - [`multipass_instance`](data-sources/instance.md) – inspect existing Multipass instances.
 - [`multipass_snapshots`](data-sources/snapshots.md) – list snapshots for an instance.
 
 ## Examples
+
+See the [1.17 guide](guides/multipass-1.17.md), [zone example](../examples/availability-zones/main.tf), and [Debian/Fedora example](../examples/multi-distro/main.tf).
 
 Ready-made Terraform configurations live under `examples/`. Start with `basic/`, then explore:
 

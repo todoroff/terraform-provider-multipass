@@ -43,6 +43,7 @@ type testClient struct {
 	multipasscli.Client
 	launchInstance  func(context.Context, models.LaunchOptions) error
 	exec            func(context.Context, string, []string) error
+	execCapture     func(context.Context, string, []string) ([]byte, error)
 	getInstance     func(context.Context, string) (*models.Instance, error)
 	getResources    func(context.Context, string) (models.InstanceResources, error)
 	setResource     func(context.Context, string, multipasscli.ResourceSetting, uint64) error
@@ -58,6 +59,10 @@ func (c *testClient) LaunchInstance(ctx context.Context, opts models.LaunchOptio
 
 func (c *testClient) Exec(ctx context.Context, instance string, command []string) error {
 	return c.exec(ctx, instance, command)
+}
+
+func (c *testClient) ExecCapture(ctx context.Context, instance string, command []string) ([]byte, error) {
+	return c.execCapture(ctx, instance, command)
 }
 
 func (c *testClient) GetInstance(ctx context.Context, name string) (*models.Instance, error) {

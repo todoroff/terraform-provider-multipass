@@ -74,6 +74,7 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | Name              | Type    | Required | Description |
 | ----------------- | ------- | -------- | ----------- |
 | `name`            | String  | Yes      | Multipass instance name. Forces recreation. |
+| `zone`            | String  | No       | Availability-zone name. Requires CLI and daemon >= 1.17. Omission chooses automatically at creation and retains placement afterward. Explicit changes force recreation. |
 | `image`           | String  | No       | Image alias/name. Defaults to provider `default_image` or `lts`. Forces recreation. |
 | `cpus`            | Number  | No       | Positive virtual CPU count. Defaults to 1 at creation; omission retains the current allocation. Changes follow `resize_policy`. |
 | `memory`          | String  | No       | Memory allocation (`1G`, `512M`, or bytes). Defaults to `1G` at creation; omission retains the current allocation. Changes follow `resize_policy`. |
@@ -90,6 +91,10 @@ See `examples/cloud-init-lab` for a full template-driven setup.
 | `timeouts`        | Block   | No       | Per-operation timeouts (`create`, `read`, `update`, `delete`). Accepts duration strings like `"20m"` or `"1h"`. Falls back to the provider `command_timeout` when not set. |
 
 ## Behavior
+
+### Availability zones
+
+Zone placement is read back during refresh and import. Older versions return null. Adding this attribute to existing state does not replace a VM unless explicitly configured placement differs. An `Unavailable` instance remains managed and retains its last known allocations; auto-recovery does not apply to zone outages. Re-enable the zone before updating the instance. See the [1.17 guide](../guides/multipass-1.17.md).
 
 ### Resizing
 
@@ -126,7 +131,11 @@ Disk allocation growth does not guarantee the guest partition and filesystem hav
 
 `mounts.read_only` must be `false` or omitted. The Multipass CLI does not support read-only mounts; setting it to `true` is rejected before launch. A `:ro` suffix is a literal part of a Multipass mount path, not a permissions option.
 
-With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry.
+With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry. Exit code 2 is accepted with a Terraform warning only when cloud-init reports `status: done`, an empty `errors` list, and only `WARNING`/`DEPRECATED` messages in `recoverable_errors`. This allows completed provisioning with warnings, such as Fedora's hostname warning, while module errors, higher-severity messages, and unrecognized results still fail creation.
+
+The initial wait uses `cloud-init status --wait` for compatibility with older guests. JSON status is requested only after exit code 2, using the remaining create timeout. A failed status query still fails creation.
+
+Recognized SSH socket disconnects during these status checks are retried once per second within the original create timeout, allowing cloud-init reboots to finish. Cancellation stops retries. Authentication errors, other CLI failures, and actual provisioning errors remain failures; provisioning commands are never rerun by this retry.
 
 ## Attributes Reference
 

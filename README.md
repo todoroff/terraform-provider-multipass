@@ -1,13 +1,14 @@
 # Terraform Multipass Provider
 
 <p align="center">
-  <img width="600"  alt="terraform-provider-multipass-heading-image" src="https://github.com/user-attachments/assets/61f462de-90b1-4352-80a7-ab6bb140e175" />
+  <img width="600" alt="Terraform Provider for Multipass - Build and Manage Multipass VMs with Terraform" src="assets/terraform-provider-multipass-header-editorial.png" />
 </p>
 
 [Terraform](https://www.terraform.io/) provider for [Canonical Multipass](https://canonical.com/multipass), implemented with the modern Terraform Plugin Framework. It exposes rich instance lifecycle management, alias automation, and data sources for images and networks while favoring performance and clear diagnostics.
 
 ## Features
 
+- Availability-zone placement and discovery with Multipass CLI and daemon >= 1.17; see the [1.17 guide](docs/guides/multipass-1.17.md).
 - Provider configuration for CLI discovery, command timeouts, default images, and cached `multipass` metadata.
 - Remote Multipass daemons through `server_address`, with provider aliases for managing multiple hosts.
 - `multipass_instance` resource with CPU/memory/disk sizing, multiple networks, host mounts, and inline or file-based cloud-init.
@@ -126,6 +127,7 @@ See the [instance resource documentation](docs/resources/instance.md#resizing) f
 
 ## Data Sources
 
+- `multipass_zones`: lists zone names, availability, and subnets, with an optional exact name filter (1.17+).
 - `multipass_images`: enumerates images/blueprints from `multipass find`, with filters for name, alias, kind, and text query.
 - `multipass_networks`: lists bridgable host networks.
 - `multipass_instance`: inspects an existing instance for read-only data.
@@ -171,6 +173,8 @@ go test ./internal/multipasscli ./internal/provider -p 1 -run '^TestAcc' -count=
 On Linux/macOS, set the same environment variables before running the Go command. Leave `TF_ACC` unset for unit tests. The suite covers scoped VM deletion, instance replacement, both resize policies and power-state preservation, cloud-init failure and retry, computed uploads, download contents and ownership, aliases, data sources, and snapshots. Run only resize acceptance tests with `go test ./internal/provider -run '^TestAccInstanceResource_resize' -count=1 -v -timeout 30m` after setting the same environment variables.
 
 ### Documentation
+
+The opt-in 1.17 acceptance suite uses `-run '^TestAcc117'` with the acceptance environment above and a `60m` timeout. It covers zones, Debian/Fedora, and cloud-init reboot completion; it skips on older versions. Live 1.17/driver validation is separate from local mock/protocol checks. See the [verification guide](docs/guides/multipass-1.17.md#readiness-and-verification).
 
 Documentation is maintained by hand under `docs/`. Resource and data-source filenames omit the `multipass_` prefix. Registry pages include YAML frontmatter, and guides set `page_title`. Keep links in the READMEs, `AGENTS.md`, and `llms.txt` aligned when renaming pages.
 

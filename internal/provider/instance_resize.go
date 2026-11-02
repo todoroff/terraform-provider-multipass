@@ -46,6 +46,16 @@ func equalSize(a, b types.String) bool {
 }
 
 func (r *instanceResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if !req.Plan.Raw.IsNull() && r.client != nil {
+		var zone types.String
+		resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("zone"), &zone)...)
+		if !zone.IsNull() {
+			if err := multipasscli.RequireZones(r.versions); err != nil {
+				resp.Diagnostics.AddAttributeError(path.Root("zone"), "Availability zones unsupported", err.Error())
+				return
+			}
+		}
+	}
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
 		return
 	}

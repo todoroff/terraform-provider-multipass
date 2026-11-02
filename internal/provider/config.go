@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/todoroff/terraform-provider-multipass/internal/models"
 
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
@@ -23,6 +24,7 @@ type providerConfig struct {
 }
 
 type providerData struct {
+	versions       models.VersionInfo
 	client         multipasscli.Client
 	defaultImage   string
 	hostOS         string

@@ -4,6 +4,7 @@ import "time"
 
 // Instance represents a Multipass instance as understood by Terraform.
 type Instance struct {
+	Zone          string
 	Name          string
 	State         string
 	Release       string
@@ -89,6 +90,7 @@ type Alias struct {
 
 // LaunchOptions controls instance creation parameters.
 type LaunchOptions struct {
+	Zone            string
 	Name            string
 	Image           string
 	CPUs            int
@@ -99,6 +101,17 @@ type LaunchOptions struct {
 	Networks        []NetworkAttachment
 	Mounts          []Mount
 	Primary         bool
+}
+
+type VersionInfo struct {
+	Client string `json:"multipass"`
+	Daemon string `json:"multipassd"`
+}
+
+type Zone struct {
+	Name      string
+	Available bool   `json:"available"`
+	Subnet    string `json:"subnet"`
 }
 
 // NetworkAttachment describes a network interface to attach during launch.

@@ -18,6 +18,8 @@ func TestMain(m *testing.M) {
 	if os.Getenv("MULTIPASS_PROVIDER_TEST_CLI") == "1" {
 		if len(os.Args) > 1 {
 			switch os.Args[1] {
+			case "ssh-error":
+				os.Exit(255)
 			case "version":
 				fmt.Fprint(os.Stdout, `{"multipass":"1.16.0"}`)
 				os.Exit(0)

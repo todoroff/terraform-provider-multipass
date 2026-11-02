@@ -7,6 +7,8 @@ description: "List and filter launchable Multipass images and blueprints."
 
 Returns the list of images and blueprints reported by `multipass find`.
 
+Multipass 1.17 adds built-in Debian and Fedora images and removes blueprints. Blueprint filtering remains supported for older versions; `kind = "blueprint"` returns an empty list on 1.17. See the [multi-distro example](../../examples/multi-distro/main.tf).
+
 ## Example Usage
 
 ```hcl

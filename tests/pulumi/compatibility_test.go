@@ -202,7 +202,7 @@ func checkSchema(t *testing.T, data []byte) {
 			t.Errorf("missing bridged resource %s", resource)
 		}
 	}
-	for _, function := range []string{"getImages", "getInstance", "getNetworks", "getSnapshots"} {
+	for _, function := range []string{"getImages", "getInstance", "getNetworks", "getSnapshots", "getZones"} {
 		if _, ok := schema.Functions["multipass:index/"+function+":"+function]; !ok {
 			t.Errorf("missing bridged data source %s", function)
 		}
@@ -213,6 +213,9 @@ func checkSchema(t *testing.T, data []byte) {
 		}
 	}
 	instance := schema.Resources["multipass:index/instance:Instance"]
+	if instance.Inputs["zone"].Type != "string" || instance.Properties["zone"].Type != "string" {
+		t.Error("instance zone must bridge as an input and output string")
+	}
 	for name, wantType := range map[string]string{"cpus": "number", "memory": "string", "disk": "string", "resizePolicy": "string", "networks": "array", "mounts": "array"} {
 		if instance.Inputs[name].Type != wantType {
 			t.Errorf("instance input %s must have type %s", name, wantType)

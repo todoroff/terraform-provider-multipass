@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/todoroff/terraform-provider-multipass/internal/models"
+	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
 func TestInstanceRejectsReadOnlyMountConfig(t *testing.T) {
@@ -65,26 +69,81 @@ func TestInstanceRejectsReadOnlyMountBeforeUpdating(t *testing.T) {
 }
 
 func TestInstanceCloudInitResult(t *testing.T) {
+	exitErr := cloudInitCLIExit(t, 2)
+	degraded := func(stdout string) error {
+		return &multipasscli.CLIError{Command: "exec vm -- cloud-init status --format json", Stdout: stdout, Err: exitErr}
+	}
 	for _, tc := range []struct {
-		name    string
-		wait    bool
-		waitErr error
+		name         string
+		wait         bool
+		waitErr      error
+		warning      bool
+		queryFailure bool
 	}{
-		{"success", true, nil}, {"failure", true, errors.New("cloud-init exited 1")}, {"timeout", true, context.DeadlineExceeded}, {"disabled", false, nil},
+		{"legacy success without JSON support", true, nil, false, false},
+		{"failure", true, errors.New("cloud-init exited 1"), false, false},
+		{"timeout", true, context.DeadlineExceeded, false, false},
+		{"cancelled", true, context.Canceled, false, false},
+		{"disabled", false, nil, false, false},
+		{"hostname warning", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), true, false},
+		{"deprecation", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"DEPRECATED":["Deprecated config"]}}`), true, false},
+		{"failed module", true, degraded(`{"status":"done","errors":["scripts-user failed"],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), false, false},
+		{"recoverable error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"ERROR":["Failed config"],"WARNING":["Failed to set the hostname"]}}`), false, false},
+		{"critical error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"CRITICAL":["Failed config"]}}`), false, false},
+		{"unknown severity", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"UNKNOWN":["Unknown problem"]}}`), false, false},
+		{"running", true, degraded(`{"status":"running","errors":[],"recoverable_errors":{"WARNING":["Still running"]}}`), false, false},
+		{"missing errors", true, degraded(`{"status":"done","recoverable_errors":{"WARNING":["Unknown result"]}}`), false, false},
+		{"null errors", true, degraded(`{"status":"done","errors":null,"recoverable_errors":{"WARNING":["Unknown result"]}}`), false, false},
+		{"missing warnings", true, degraded(`{"status":"done","errors":[]}`), false, false},
+		{"invalid json", true, degraded(`not json`), false, false},
+		{"empty output", true, degraded(``), false, false},
+		{"status query timeout", true, context.DeadlineExceeded, false, true},
+		{"status query cancelled", true, context.Canceled, false, true},
+		{"status query failure", true, errors.New("status query unavailable"), false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			waitCalls := 0
+			waitCalls, statusCalls := 0, 0
+			var waitExit *exec.ExitError
+			queryExpected := tc.queryFailure || errors.As(tc.waitErr, &waitExit)
 			r := &instanceResource{commandTimeout: time.Second, client: &testClient{
 				launchInstance: func(context.Context, models.LaunchOptions) error { return nil },
-				exec:           func(_ context.Context, _ string, command []string) error { waitCalls++; return tc.waitErr },
+				execCapture: func(_ context.Context, _ string, command []string) ([]byte, error) {
+					if reflect.DeepEqual(command, []string{"cloud-init", "status", "--wait"}) {
+						waitCalls++
+						if queryExpected {
+							return nil, &multipasscli.CLIError{Command: "exec vm -- cloud-init status --wait", Stdout: "status: done", Err: exitErr}
+						}
+						return nil, tc.waitErr
+					}
+					statusCalls++
+					if !queryExpected {
+						t.Fatal("JSON status must not be requested after a successful or failed legacy wait")
+					}
+					if !reflect.DeepEqual(command, []string{"cloud-init", "status", "--format", "json"}) {
+						t.Fatalf("unexpected status command: %v", command)
+					}
+					return nil, tc.waitErr
+				},
 			}}
 			s := resourceSchema(r)
 			plan := tfsdk.Plan{Schema: s, Raw: resourceValue(s, map[string]any{"name": "vm", "wait_for_cloud_init": tc.wait, "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}})}
 			resp := resource.CreateResponse{State: tfsdk.State{Schema: s}}
 			r.Create(ctx, resource.CreateRequest{Plan: plan}, &resp)
-			if resp.Diagnostics.HasError() != (tc.waitErr != nil) {
+			if resp.Diagnostics.HasError() != (tc.waitErr != nil && !tc.warning) {
 				t.Fatalf("diagnostics: %v", resp.Diagnostics)
+			}
+			foundWarning := false
+			for _, d := range resp.Diagnostics {
+				if d.Summary() == "cloud-init completed with warnings" {
+					foundWarning = true
+					if !strings.Contains(d.Detail(), "Failed to set the hostname") && !strings.Contains(d.Detail(), "Deprecated config") {
+						t.Fatalf("missing guest warning: %s", d.Detail())
+					}
+				}
+			}
+			if foundWarning != tc.warning {
+				t.Fatalf("warning=%t, want %t: %v", foundWarning, tc.warning, resp.Diagnostics)
 			}
 			var state instanceResourceModel
 			if d := resp.State.Get(ctx, &state); d.HasError() {
@@ -95,6 +154,9 @@ func TestInstanceCloudInitResult(t *testing.T) {
 			}
 			if (waitCalls == 1) != tc.wait {
 				t.Fatalf("wait calls=%d", waitCalls)
+			}
+			if (statusCalls == 1) != queryExpected {
+				t.Fatalf("status calls=%d, expected query=%t", statusCalls, queryExpected)
 			}
 		})
 	}

@@ -151,7 +151,7 @@ func (p *MultipassProvider) Configure(ctx context.Context, req provider.Configur
 			fmt.Sprintf("Multipass client could not report its version: %v", vErr),
 		)
 	} else {
-		if err := ensureSupportedVersion(ver); err != nil {
+		if err := ensureSupportedVersion(ver.Client); err != nil {
 			resp.Diagnostics.AddWarning("Unsupported multipass version", err.Error())
 		} else {
 			tflog.Info(ctx, "Detected Multipass CLI", map[string]any{"version": ver})
@@ -164,6 +164,7 @@ func (p *MultipassProvider) Configure(ctx context.Context, req provider.Configur
 	p.mu.Unlock()
 
 	resp.ResourceData = providerData{
+		versions:       ver,
 		client:         client,
 		defaultImage:   cfg.DefaultImage,
 		hostOS:         p.hostOS,
@@ -190,6 +191,7 @@ func (p *MultipassProvider) DataSources(_ context.Context) []func() datasource.D
 		NewNetworksDataSource,
 		NewInstanceDataSource,
 		NewSnapshotsDataSource,
+		NewZonesDataSource,
 	}
 }
 
