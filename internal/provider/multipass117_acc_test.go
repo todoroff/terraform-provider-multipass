@@ -87,6 +87,11 @@ resource "multipass_instance" "test" {
   wait_for_cloud_init = true
   timeouts { create = "20m" }
 }
+resource "multipass_file_upload" "ready" {
+  instance = multipass_instance.test.name
+  destination = "/tmp/terraform-cloud-init-ready"
+  content = "ready"
+}
 `, name, image)
 			resource.Test(t, resource.TestCase{PreCheck: func() { testAcc117PreCheck(t) }, ProtoV6ProviderFactories: testAccProtoV6ProviderFactories, CheckDestroy: testAccCheckInstanceDestroy, Steps: []resource.TestStep{
 				{Config: config, Check: func(*terraform.State) error {
@@ -94,7 +99,7 @@ resource "multipass_instance" "test" {
 					if err != nil {
 						return err
 					}
-					return c.Exec(context.Background(), name, []string{"sh", "-c", `. /etc/os-release; test "$ID" = "$1"`, "sh", image})
+					return c.Exec(context.Background(), name, []string{"sh", "-c", `. /etc/os-release; test "$ID" = "$1" && test "$(cat /tmp/terraform-cloud-init-ready)" = ready`, "sh", image})
 				}},
 			}})
 		})

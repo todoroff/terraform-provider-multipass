@@ -3,6 +3,10 @@ package provider
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/todoroff/terraform-provider-multipass/internal/models"
+	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
 func TestInstanceRejectsReadOnlyMountConfig(t *testing.T) {
@@ -65,26 +70,71 @@ func TestInstanceRejectsReadOnlyMountBeforeUpdating(t *testing.T) {
 }
 
 func TestInstanceCloudInitResult(t *testing.T) {
+	// The existing CLI fixture exits 2 for unknown commands, on every supported OS.
+	cmd := exec.Command(os.Args[0], "cloud-init")
+	cmd.Env = append(os.Environ(), "MULTIPASS_PROVIDER_TEST_CLI=1")
+	exitErr, ok := cmd.Run().(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 2 {
+		t.Fatal("expected fixture exit code 2")
+	}
+	degraded := func(stdout string) error {
+		return &multipasscli.CLIError{Command: "exec vm -- cloud-init status --wait --format json", Stdout: stdout, Err: exitErr}
+	}
 	for _, tc := range []struct {
 		name    string
 		wait    bool
 		waitErr error
+		warning bool
 	}{
-		{"success", true, nil}, {"failure", true, errors.New("cloud-init exited 1")}, {"timeout", true, context.DeadlineExceeded}, {"disabled", false, nil},
+		{"success", true, nil, false},
+		{"failure", true, errors.New("cloud-init exited 1"), false},
+		{"timeout", true, context.DeadlineExceeded, false},
+		{"cancelled", true, context.Canceled, false},
+		{"disabled", false, nil, false},
+		{"hostname warning", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), true},
+		{"deprecation", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"DEPRECATED":["Deprecated config"]}}`), true},
+		{"failed module", true, degraded(`{"status":"done","errors":["scripts-user failed"],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), false},
+		{"recoverable error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"ERROR":["Failed config"],"WARNING":["Failed to set the hostname"]}}`), false},
+		{"critical error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"CRITICAL":["Failed config"]}}`), false},
+		{"unknown severity", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"UNKNOWN":["Unknown problem"]}}`), false},
+		{"running", true, degraded(`{"status":"running","errors":[],"recoverable_errors":{"WARNING":["Still running"]}}`), false},
+		{"missing errors", true, degraded(`{"status":"done","recoverable_errors":{"WARNING":["Unknown result"]}}`), false},
+		{"null errors", true, degraded(`{"status":"done","errors":null,"recoverable_errors":{"WARNING":["Unknown result"]}}`), false},
+		{"missing warnings", true, degraded(`{"status":"done","errors":[]}`), false},
+		{"invalid json", true, degraded(`not json`), false},
+		{"empty output", true, degraded(``), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			waitCalls := 0
 			r := &instanceResource{commandTimeout: time.Second, client: &testClient{
 				launchInstance: func(context.Context, models.LaunchOptions) error { return nil },
-				exec:           func(_ context.Context, _ string, command []string) error { waitCalls++; return tc.waitErr },
+				exec: func(_ context.Context, _ string, command []string) error {
+					waitCalls++
+					if !reflect.DeepEqual(command, []string{"cloud-init", "status", "--wait", "--format", "json"}) {
+						t.Fatalf("unexpected command: %v", command)
+					}
+					return tc.waitErr
+				},
 			}}
 			s := resourceSchema(r)
 			plan := tfsdk.Plan{Schema: s, Raw: resourceValue(s, map[string]any{"name": "vm", "wait_for_cloud_init": tc.wait, "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}})}
 			resp := resource.CreateResponse{State: tfsdk.State{Schema: s}}
 			r.Create(ctx, resource.CreateRequest{Plan: plan}, &resp)
-			if resp.Diagnostics.HasError() != (tc.waitErr != nil) {
+			if resp.Diagnostics.HasError() != (tc.waitErr != nil && !tc.warning) {
 				t.Fatalf("diagnostics: %v", resp.Diagnostics)
+			}
+			foundWarning := false
+			for _, d := range resp.Diagnostics {
+				if d.Summary() == "cloud-init completed with warnings" {
+					foundWarning = true
+					if !strings.Contains(d.Detail(), "Failed to set the hostname") && !strings.Contains(d.Detail(), "Deprecated config") {
+						t.Fatalf("missing guest warning: %s", d.Detail())
+					}
+				}
+			}
+			if foundWarning != tc.warning {
+				t.Fatalf("warning=%t, want %t: %v", foundWarning, tc.warning, resp.Diagnostics)
 			}
 			var state instanceResourceModel
 			if d := resp.State.Get(ctx, &state); d.HasError() {

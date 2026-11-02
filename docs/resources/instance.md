@@ -131,7 +131,7 @@ Disk allocation growth does not guarantee the guest partition and filesystem hav
 
 `mounts.read_only` must be `false` or omitted. The Multipass CLI does not support read-only mounts; setting it to `true` is rejected before launch. A `:ro` suffix is a literal part of a Multipass mount path, not a permissions option.
 
-With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry.
+With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry. Exit code 2 is accepted with a Terraform warning only when cloud-init reports `status: done`, an empty `errors` list, and only `WARNING`/`DEPRECATED` messages in `recoverable_errors`. This allows completed provisioning with warnings, such as Fedora's hostname warning, while module errors, higher-severity messages, and unrecognized results still fail creation.
 
 ## Attributes Reference
 

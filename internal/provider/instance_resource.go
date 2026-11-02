@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -386,12 +388,13 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 
 	if plan.WaitForCloudInit.ValueBool() {
 		tflog.Info(ctx, "Waiting for cloud-init to finish", map[string]any{"name": opts.Name})
-		if err := r.waitForCloudInit(createCtx, opts.Name); err != nil {
+		cloudInitDiags := r.waitForCloudInit(createCtx, opts.Name)
+		resp.Diagnostics.Append(cloudInitDiags...)
+		if cloudInitDiags.HasError() {
 			// The VM already exists. Persist it before returning an error so
 			// Terraform can clean up or replace the failed creation, while
 			// preventing dependent resources from running.
 			resp.Diagnostics.Append(r.refreshState(ctx, opts.Name, &plan)...)
-			resp.Diagnostics.AddError("cloud-init wait failed", err.Error())
 			return
 		}
 	}
@@ -902,10 +905,38 @@ func (r *instanceResource) waitForInstanceAfterTimeout(ctx context.Context, name
 
 // waitForCloudInit runs `cloud-init status --wait` inside the instance,
 // which blocks until cloud-init reaches a terminal state (done/error/disabled).
-func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) error {
-	if err := r.client.Exec(ctx, name, []string{"cloud-init", "status", "--wait"}); err != nil {
-		return fmt.Errorf("cloud-init did not finish successfully on instance %q: %w. "+
-			"Check logs with: multipass exec %s -- cat /var/log/cloud-init-output.log", name, err, name)
+func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	err := r.client.Exec(ctx, name, []string{"cloud-init", "status", "--wait", "--format", "json"})
+	if err == nil {
+		return diags
 	}
-	return nil
+	var cliErr *multipasscli.CLIError
+	var exitErr *exec.ExitError
+	if errors.As(err, &cliErr) && errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		var status struct {
+			Status            string              `json:"status"`
+			Errors            []string            `json:"errors"`
+			RecoverableErrors map[string][]string `json:"recoverable_errors"`
+		}
+		// Exit 2 can also report failed modules; accept only confirmed warning-only completion.
+		if json.Unmarshal([]byte(cliErr.Stdout), &status) == nil && status.Status == "done" && status.Errors != nil && len(status.Errors) == 0 {
+			warningsOnly := true
+			for level, messages := range status.RecoverableErrors {
+				if len(messages) > 0 && level != "WARNING" && level != "DEPRECATED" {
+					warningsOnly = false
+				}
+			}
+			messages := append(status.RecoverableErrors["WARNING"], status.RecoverableErrors["DEPRECATED"]...)
+			if warningsOnly && len(messages) > 0 {
+				diags.AddWarning("cloud-init completed with warnings", fmt.Sprintf(
+					"Instance %q finished cloud-init with recoverable warnings:\n%s\nInspect with: multipass exec %s -- cloud-init status --long",
+					name, strings.Join(messages, "\n"), name))
+				return diags
+			}
+		}
+	}
+	diags.AddError("cloud-init wait failed", fmt.Sprintf("cloud-init did not finish successfully on instance %q: %v. "+
+		"Check logs with: multipass exec %s -- cat /var/log/cloud-init-output.log", name, err, name))
+	return diags
 }

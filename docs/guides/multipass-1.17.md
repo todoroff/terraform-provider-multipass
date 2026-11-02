@@ -19,7 +19,7 @@ See the [availability-zone example](../../examples/availability-zones/main.tf). 
 
 `image = "debian"` and `image = "fedora"` use the existing launch argument. See the [multi-distro example](../../examples/multi-distro/main.tf). Adapt guest paths and provisioning commands to the selected OS.
 
-Multipass 1.17 removes blueprints. The images data source still reads them on older versions; `kind = "blueprint"` returns an empty list on 1.17. JSON property order is irrelevant to the provider. Guest command exit failures, including cloud-init failures, remain errors with their original CLI exit status; a created VM remains in state if cloud-init fails.
+Multipass 1.17 removes blueprints. The images data source still reads them on older versions; `kind = "blueprint"` returns an empty list on 1.17. JSON property order is irrelevant to the provider. Guest command failures retain their original CLI exit status. For `wait_for_cloud_init`, exit code 2 with confirmed warning-only completion is surfaced as a Terraform warning; failed modules and other errors still fail creation and leave the VM in state. See [cloud-init behavior](../resources/instance.md#mounts-and-cloud-init).
 
 Multipass itself supplies the new HCS and Apple Virtualization drivers. This provider does not select or migrate drivers. See the [upstream release notes](https://github.com/canonical/multipass/releases/tag/v1.17.0).
 
