@@ -78,43 +78,62 @@ func TestInstanceCloudInitResult(t *testing.T) {
 		t.Fatal("expected fixture exit code 2")
 	}
 	degraded := func(stdout string) error {
-		return &multipasscli.CLIError{Command: "exec vm -- cloud-init status --wait --format json", Stdout: stdout, Err: exitErr}
+		return &multipasscli.CLIError{Command: "exec vm -- cloud-init status --format json", Stdout: stdout, Err: exitErr}
 	}
 	for _, tc := range []struct {
-		name    string
-		wait    bool
-		waitErr error
-		warning bool
+		name         string
+		wait         bool
+		waitErr      error
+		warning      bool
+		queryFailure bool
 	}{
-		{"success", true, nil, false},
-		{"failure", true, errors.New("cloud-init exited 1"), false},
-		{"timeout", true, context.DeadlineExceeded, false},
-		{"cancelled", true, context.Canceled, false},
-		{"disabled", false, nil, false},
-		{"hostname warning", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), true},
-		{"deprecation", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"DEPRECATED":["Deprecated config"]}}`), true},
-		{"failed module", true, degraded(`{"status":"done","errors":["scripts-user failed"],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), false},
-		{"recoverable error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"ERROR":["Failed config"],"WARNING":["Failed to set the hostname"]}}`), false},
-		{"critical error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"CRITICAL":["Failed config"]}}`), false},
-		{"unknown severity", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"UNKNOWN":["Unknown problem"]}}`), false},
-		{"running", true, degraded(`{"status":"running","errors":[],"recoverable_errors":{"WARNING":["Still running"]}}`), false},
-		{"missing errors", true, degraded(`{"status":"done","recoverable_errors":{"WARNING":["Unknown result"]}}`), false},
-		{"null errors", true, degraded(`{"status":"done","errors":null,"recoverable_errors":{"WARNING":["Unknown result"]}}`), false},
-		{"missing warnings", true, degraded(`{"status":"done","errors":[]}`), false},
-		{"invalid json", true, degraded(`not json`), false},
-		{"empty output", true, degraded(``), false},
+		{"legacy success without JSON support", true, nil, false, false},
+		{"failure", true, errors.New("cloud-init exited 1"), false, false},
+		{"timeout", true, context.DeadlineExceeded, false, false},
+		{"cancelled", true, context.Canceled, false, false},
+		{"disabled", false, nil, false, false},
+		{"hostname warning", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), true, false},
+		{"deprecation", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"DEPRECATED":["Deprecated config"]}}`), true, false},
+		{"failed module", true, degraded(`{"status":"done","errors":["scripts-user failed"],"recoverable_errors":{"WARNING":["Failed to set the hostname"]}}`), false, false},
+		{"recoverable error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"ERROR":["Failed config"],"WARNING":["Failed to set the hostname"]}}`), false, false},
+		{"critical error", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"CRITICAL":["Failed config"]}}`), false, false},
+		{"unknown severity", true, degraded(`{"status":"done","errors":[],"recoverable_errors":{"UNKNOWN":["Unknown problem"]}}`), false, false},
+		{"running", true, degraded(`{"status":"running","errors":[],"recoverable_errors":{"WARNING":["Still running"]}}`), false, false},
+		{"missing errors", true, degraded(`{"status":"done","recoverable_errors":{"WARNING":["Unknown result"]}}`), false, false},
+		{"null errors", true, degraded(`{"status":"done","errors":null,"recoverable_errors":{"WARNING":["Unknown result"]}}`), false, false},
+		{"missing warnings", true, degraded(`{"status":"done","errors":[]}`), false, false},
+		{"invalid json", true, degraded(`not json`), false, false},
+		{"empty output", true, degraded(``), false, false},
+		{"status query timeout", true, context.DeadlineExceeded, false, true},
+		{"status query cancelled", true, context.Canceled, false, true},
+		{"status query failure", true, errors.New("status query unavailable"), false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			waitCalls := 0
+			waitCalls, statusCalls := 0, 0
+			var waitExit *exec.ExitError
+			queryExpected := tc.queryFailure || errors.As(tc.waitErr, &waitExit)
 			r := &instanceResource{commandTimeout: time.Second, client: &testClient{
 				launchInstance: func(context.Context, models.LaunchOptions) error { return nil },
 				exec: func(_ context.Context, _ string, command []string) error {
 					waitCalls++
-					if !reflect.DeepEqual(command, []string{"cloud-init", "status", "--wait", "--format", "json"}) {
+					if !reflect.DeepEqual(command, []string{"cloud-init", "status", "--wait"}) {
 						t.Fatalf("unexpected command: %v", command)
 					}
+					if queryExpected {
+						return &multipasscli.CLIError{Command: "exec vm -- cloud-init status --wait", Stdout: "status: done", Err: exitErr}
+					}
 					return tc.waitErr
+				},
+				execCapture: func(_ context.Context, _ string, command []string) ([]byte, error) {
+					statusCalls++
+					if !queryExpected {
+						t.Fatal("JSON status must not be requested after a successful or failed legacy wait")
+					}
+					if !reflect.DeepEqual(command, []string{"cloud-init", "status", "--format", "json"}) {
+						t.Fatalf("unexpected status command: %v", command)
+					}
+					return nil, tc.waitErr
 				},
 			}}
 			s := resourceSchema(r)
@@ -145,6 +164,9 @@ func TestInstanceCloudInitResult(t *testing.T) {
 			}
 			if (waitCalls == 1) != tc.wait {
 				t.Fatalf("wait calls=%d", waitCalls)
+			}
+			if (statusCalls == 1) != queryExpected {
+				t.Fatalf("status calls=%d, expected query=%t", statusCalls, queryExpected)
 			}
 		})
 	}

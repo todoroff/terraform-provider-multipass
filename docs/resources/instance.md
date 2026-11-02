@@ -133,6 +133,8 @@ Disk allocation growth does not guarantee the guest partition and filesystem hav
 
 With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry. Exit code 2 is accepted with a Terraform warning only when cloud-init reports `status: done`, an empty `errors` list, and only `WARNING`/`DEPRECATED` messages in `recoverable_errors`. This allows completed provisioning with warnings, such as Fedora's hostname warning, while module errors, higher-severity messages, and unrecognized results still fail creation.
 
+The initial wait uses `cloud-init status --wait` for compatibility with older guests. JSON status is requested only after exit code 2, using the remaining create timeout. A failed status query still fails creation.
+
 ## Attributes Reference
 
 | Name             | Description |

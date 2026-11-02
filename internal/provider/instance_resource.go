@@ -907,20 +907,30 @@ func (r *instanceResource) waitForInstanceAfterTimeout(ctx context.Context, name
 // which blocks until cloud-init reaches a terminal state (done/error/disabled).
 func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) diag.Diagnostics {
 	var diags diag.Diagnostics
-	err := r.client.Exec(ctx, name, []string{"cloud-init", "status", "--wait", "--format", "json"})
+	err := r.client.Exec(ctx, name, []string{"cloud-init", "status", "--wait"})
 	if err == nil {
 		return diags
 	}
 	var cliErr *multipasscli.CLIError
 	var exitErr *exec.ExitError
 	if errors.As(err, &cliErr) && errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		// Older cloud-init versions lack JSON status; only newer warning exits need it.
+		output, statusErr := r.client.ExecCapture(ctx, name, []string{"cloud-init", "status", "--format", "json"})
+		statusOK := statusErr == nil
+		if errors.As(statusErr, &cliErr) && errors.As(statusErr, &exitErr) && exitErr.ExitCode() == 2 {
+			output = []byte(cliErr.Stdout)
+			statusOK = true
+		}
+		if !statusOK {
+			err = fmt.Errorf("%w; reading cloud-init status failed: %v", err, statusErr)
+		}
 		var status struct {
 			Status            string              `json:"status"`
 			Errors            []string            `json:"errors"`
 			RecoverableErrors map[string][]string `json:"recoverable_errors"`
 		}
 		// Exit 2 can also report failed modules; accept only confirmed warning-only completion.
-		if json.Unmarshal([]byte(cliErr.Stdout), &status) == nil && status.Status == "done" && status.Errors != nil && len(status.Errors) == 0 {
+		if statusOK && json.Unmarshal(output, &status) == nil && status.Status == "done" && status.Errors != nil && len(status.Errors) == 0 {
 			warningsOnly := true
 			for level, messages := range status.RecoverableErrors {
 				if len(messages) > 0 && level != "WARNING" && level != "DEPRECATED" {
