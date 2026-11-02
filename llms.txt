@@ -2,7 +2,7 @@
 
 > A Terraform provider for managing Canonical Multipass virtual machines, aliases, snapshots, and file transfers. Source: `todoroff/multipass`. Requires Multipass CLI >= 1.13 on the host.
 
-The provider shells out to the `multipass` CLI (no REST API). It supports five resources and four data sources for full VM lifecycle management.
+The provider shells out to the `multipass` CLI (no REST API). It supports five resources and five data sources for full VM lifecycle management.
 
 Provider configuration accepts: `multipass_path` (default: `"multipass"` from PATH), `server_address` (optional per-provider override of `MULTIPASS_SERVER_ADDRESS`, otherwise environment / CLI local default), `command_timeout` (default: `600` seconds), and `default_image` (default: `"lts"`). Use provider aliases to select multiple remote daemons; the local CLI user must authenticate with each daemon first.
 
