@@ -907,7 +907,7 @@ func (r *instanceResource) waitForInstanceAfterTimeout(ctx context.Context, name
 // which blocks until cloud-init reaches a terminal state (done/error/disabled).
 func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) diag.Diagnostics {
 	var diags diag.Diagnostics
-	err := r.client.Exec(ctx, name, []string{"cloud-init", "status", "--wait"})
+	_, err := r.cloudInitStatus(ctx, name, "--wait")
 	if err == nil {
 		return diags
 	}
@@ -915,7 +915,7 @@ func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) di
 	var exitErr *exec.ExitError
 	if errors.As(err, &cliErr) && errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
 		// Older cloud-init versions lack JSON status; only newer warning exits need it.
-		output, statusErr := r.client.ExecCapture(ctx, name, []string{"cloud-init", "status", "--format", "json"})
+		output, statusErr := r.cloudInitStatus(ctx, name, "--format", "json")
 		statusOK := statusErr == nil
 		if errors.As(statusErr, &cliErr) && errors.As(statusErr, &exitErr) && exitErr.ExitCode() == 2 {
 			output = []byte(cliErr.Stdout)
@@ -949,4 +949,42 @@ func (r *instanceResource) waitForCloudInit(ctx context.Context, name string) di
 	diags.AddError("cloud-init wait failed", fmt.Sprintf("cloud-init did not finish successfully on instance %q: %v. "+
 		"Check logs with: multipass exec %s -- cat /var/log/cloud-init-output.log", name, err, name))
 	return diags
+}
+
+// Only status reads are safe to retry; other guest commands may have side effects.
+func (r *instanceResource) cloudInitStatus(ctx context.Context, name string, flags ...string) ([]byte, error) {
+	command := append([]string{"cloud-init", "status"}, flags...)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		output, err := r.client.ExecCapture(ctx, name, command)
+		if !isCloudInitSSHDisconnect(err) {
+			return output, err
+		}
+		tflog.Debug(ctx, "SSH disconnected during cloud-init status; retrying", map[string]any{"name": name})
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w while reconnecting for cloud-init status; last error: %v", ctx.Err(), err)
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func isCloudInitSSHDisconnect(err error) bool {
+	var cliErr *multipasscli.CLIError
+	var exitErr *exec.ExitError
+	if !errors.As(err, &cliErr) || !errors.As(err, &exitErr) || exitErr.ExitCode() != 255 {
+		return false
+	}
+	for _, prefix := range []string{
+		"exec failed: ssh connection failed: ",
+		"exec failed: [ssh client] channel creation failed: ",
+		"exec failed: [ssh proc] failed to open session channel: ",
+	} {
+		if strings.HasPrefix(cliErr.Stderr, prefix) && strings.Contains(cliErr.Stderr[len(prefix):], "Socket error:") {
+			return true
+		}
+	}
+	return false
 }

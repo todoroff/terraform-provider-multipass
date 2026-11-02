@@ -135,6 +135,8 @@ With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creatio
 
 The initial wait uses `cloud-init status --wait` for compatibility with older guests. JSON status is requested only after exit code 2, using the remaining create timeout. A failed status query still fails creation.
 
+Recognized SSH socket disconnects during these status checks are retried once per second within the original create timeout, allowing cloud-init reboots to finish. Cancellation stops retries. Authentication errors, other CLI failures, and actual provisioning errors remain failures; provisioning commands are never rerun by this retry.
+
 ## Attributes Reference
 
 | Name             | Description |

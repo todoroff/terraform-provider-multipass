@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -70,13 +69,7 @@ func TestInstanceRejectsReadOnlyMountBeforeUpdating(t *testing.T) {
 }
 
 func TestInstanceCloudInitResult(t *testing.T) {
-	// The existing CLI fixture exits 2 for unknown commands, on every supported OS.
-	cmd := exec.Command(os.Args[0], "cloud-init")
-	cmd.Env = append(os.Environ(), "MULTIPASS_PROVIDER_TEST_CLI=1")
-	exitErr, ok := cmd.Run().(*exec.ExitError)
-	if !ok || exitErr.ExitCode() != 2 {
-		t.Fatal("expected fixture exit code 2")
-	}
+	exitErr := cloudInitCLIExit(t, 2)
 	degraded := func(stdout string) error {
 		return &multipasscli.CLIError{Command: "exec vm -- cloud-init status --format json", Stdout: stdout, Err: exitErr}
 	}
@@ -115,17 +108,14 @@ func TestInstanceCloudInitResult(t *testing.T) {
 			queryExpected := tc.queryFailure || errors.As(tc.waitErr, &waitExit)
 			r := &instanceResource{commandTimeout: time.Second, client: &testClient{
 				launchInstance: func(context.Context, models.LaunchOptions) error { return nil },
-				exec: func(_ context.Context, _ string, command []string) error {
-					waitCalls++
-					if !reflect.DeepEqual(command, []string{"cloud-init", "status", "--wait"}) {
-						t.Fatalf("unexpected command: %v", command)
-					}
-					if queryExpected {
-						return &multipasscli.CLIError{Command: "exec vm -- cloud-init status --wait", Stdout: "status: done", Err: exitErr}
-					}
-					return tc.waitErr
-				},
 				execCapture: func(_ context.Context, _ string, command []string) ([]byte, error) {
+					if reflect.DeepEqual(command, []string{"cloud-init", "status", "--wait"}) {
+						waitCalls++
+						if queryExpected {
+							return nil, &multipasscli.CLIError{Command: "exec vm -- cloud-init status --wait", Stdout: "status: done", Err: exitErr}
+						}
+						return nil, tc.waitErr
+					}
 					statusCalls++
 					if !queryExpected {
 						t.Fatal("JSON status must not be requested after a successful or failed legacy wait")
