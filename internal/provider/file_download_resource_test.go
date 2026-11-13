@@ -565,3 +565,72 @@ func TestDownloadDirectoryValidationRejectsUnreadableTree(t *testing.T) {
 		t.Fatal("unreadable subtree accepted")
 	}
 }
+
+func TestDirectoryDownloadRejectsProjectPayload(t *testing.T) {
+	for _, method := range []string{"direct", "tar"} {
+		for _, existing := range []bool{false, true} {
+			for _, marker := range []string{"project/main.tf", "project/.git/config"} {
+				t.Run(fmt.Sprintf("%s/existing=%v/%s", method, existing, marker), func(t *testing.T) {
+					parent := t.TempDir()
+					dest := filepath.Join(parent, "output")
+					previous := filepath.Join(dest, "previous")
+					if existing {
+						if err := os.Mkdir(dest, 0700); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(previous, []byte("keep"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					r := &fileDownloadResource{}
+					model := fileDownloadResourceModel{Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
+					var d diag.Diagnostics
+					if method == "direct" {
+						source := t.TempDir()
+						file := filepath.Join(source, filepath.FromSlash(marker))
+						if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(file, []byte("project"), 0600); err != nil {
+							t.Fatal(err)
+						}
+						d = r.copyDirectory(source, dest, &model)
+					} else {
+						var archive bytes.Buffer
+						writer := tar.NewWriter(&archive)
+						if err := writer.WriteHeader(&tar.Header{Name: marker, Typeflag: tar.TypeReg, Mode: 0600, Size: 7}); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := writer.Write([]byte("project")); err != nil {
+							t.Fatal(err)
+						}
+						if err := writer.Close(); err != nil {
+							t.Fatal(err)
+						}
+						d = r.writeDirectoryFromTar(archive.Bytes(), dest, &model)
+					}
+					if !d.HasError() || d[0].Summary() != "Unsafe recursive download" {
+						t.Errorf("unsafe payload accepted: %v", d)
+					}
+					wantEntries := 0
+					if existing {
+						wantEntries = 1
+						if contents, err := os.ReadFile(previous); err != nil || string(contents) != "keep" {
+							t.Errorf("previous download lost: %q %v", contents, err)
+						}
+						entries, err := os.ReadDir(dest)
+						if err != nil || len(entries) != 1 {
+							t.Errorf("unsafe payload installed: %v %v", entries, err)
+						}
+					} else if _, err := os.Stat(dest); !os.IsNotExist(err) {
+						t.Errorf("destination installed: %v", err)
+					}
+					entries, err := os.ReadDir(parent)
+					if err != nil || len(entries) != wantEntries {
+						t.Errorf("staging or backup leaked: %v %v", entries, err)
+					}
+				})
+			}
+		}
+	}
+}

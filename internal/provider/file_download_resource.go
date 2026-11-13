@@ -466,6 +466,10 @@ func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, wri
 	if diags.HasError() {
 		return diags
 	}
+	if err := validateDownloadDirectory(stage); err != nil {
+		diags.AddError("Unsafe recursive download", err.Error())
+		return diags
+	}
 	if _, err := hashDirectory(stage); err != nil {
 		diags.AddError("Failed to validate staged download", err.Error())
 		return diags
