@@ -360,6 +360,9 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 			return
 		}
 
+		// Cloud-init shares the remaining recovery budget and request cancellation.
+		createCtx = recoveryCtx
+
 		resp.Diagnostics.AddWarning(
 			"Launch timed out but instance was created",
 			fmt.Sprintf("The launch command timed out, but instance %q was successfully created by the Multipass daemon.", opts.Name),
