@@ -612,7 +612,7 @@ func (r *fileDownloadResource) writeFileBytes(data []byte, dest string, model *f
 		return diags
 	}
 
-	if err := os.WriteFile(destPath, data, 0o644); err != nil {
+	if err := writeDownloadFile(destPath, bytes.NewReader(data)); err != nil {
 		diags.AddError("Failed to write destination file", err.Error())
 		return diags
 	}
@@ -656,20 +656,11 @@ func extractDownloadTar(data []byte, dest string) diag.Diagnostics {
 				diags.AddError("Failed to create parent directory", err.Error())
 				return diags
 			}
-			out, err := os.Create(targetPath)
-			if err != nil {
-				diags.AddError("Failed to create file", err.Error())
-				return diags
-			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
+			if err := writeDownloadFile(targetPath, tr); err != nil {
 				diags.AddError("Failed to extract file", err.Error())
 				return diags
 			}
-			if err := out.Close(); err != nil {
-				diags.AddError("Failed to close extracted file", err.Error())
-				return diags
-			}
+
 		default:
 			diags.AddError("Unsupported archive entry", fmt.Sprintf("Entry %q has unsupported type %d", hdr.Name, hdr.Typeflag))
 			return diags
@@ -728,13 +719,23 @@ func copyFileContents(src, dest string) error {
 	}
 	defer in.Close()
 
-	out, err := os.Create(dest)
+	return writeDownloadFile(dest, in)
+}
+
+func writeDownloadFile(dest string, source io.Reader) error {
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE, 0o600)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
+	// Restrict existing files before writing any newly downloaded secrets.
+	if err := out.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := out.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, source); err != nil {
 		return err
 	}
 	return out.Close()

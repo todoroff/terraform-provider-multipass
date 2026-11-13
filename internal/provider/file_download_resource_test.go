@@ -455,3 +455,66 @@ func TestRecursiveDownloadRejectsBroadPaths(t *testing.T) {
 		}
 	})
 }
+
+func TestDownloadedFilesArePrivate(t *testing.T) {
+	for _, method := range []string{"new file", "overwrite", "direct directory", "tar directory"} {
+		t.Run(method, func(t *testing.T) {
+			root := t.TempDir()
+			dest := filepath.Join(root, "secret")
+			r := &fileDownloadResource{}
+			model := fileDownloadResourceModel{Source: types.StringValue("/secret"), Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
+			switch method {
+			case "new file", "overwrite":
+				if method == "overwrite" {
+					if err := os.WriteFile(dest, []byte("previous longer content"), 0644); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chmod(dest, 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if d := r.writeFileBytes([]byte("secret"), dest, &model); d.HasError() {
+					t.Fatal(d)
+				}
+			case "direct directory":
+				source := filepath.Join(root, "source")
+				if err := os.Mkdir(source, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(source, "secret"), []byte("secret"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if d := r.copyDirectory(source, dest, &model); d.HasError() {
+					t.Fatal(d)
+				}
+				dest = filepath.Join(dest, "secret")
+			case "tar directory":
+				var archive bytes.Buffer
+				tw := tar.NewWriter(&archive)
+				if err := tw.WriteHeader(&tar.Header{Name: "secret", Typeflag: tar.TypeReg, Mode: 0644, Size: 6}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tw.Write([]byte("secret")); err != nil {
+					t.Fatal(err)
+				}
+				if err := tw.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if d := r.writeDirectoryFromTar(archive.Bytes(), dest, &model); d.HasError() {
+					t.Fatal(d)
+				}
+				dest = filepath.Join(dest, "secret")
+			}
+			if data, err := os.ReadFile(dest); err != nil || string(data) != "secret" {
+				t.Fatalf("content=%q error=%v", data, err)
+			}
+			info, err := os.Stat(dest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+				t.Fatalf("download exposes secrets: mode=%o, want 600", info.Mode().Perm())
+			}
+		})
+	}
+}
