@@ -3,6 +3,7 @@ package multipasscli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,5 +112,13 @@ func TestDeleteInstanceScopesPurge(t *testing.T) {
 				t.Fatal("unexpected additional command; global purge must never be used")
 			}
 		})
+	}
+}
+
+func TestLaunchNameCollision(t *testing.T) {
+	c, _ := recordingClient(t)
+	t.Setenv("MULTIPASS_TEST_RESPONSES", `{"launch --name vm --timeout 5":{"Stderr":"launch failed: instance \"vm\" already exists","ExitCode":1}}`)
+	if err := c.LaunchInstance(context.Background(), models.LaunchOptions{Name: "vm"}); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("collision not classified: %v", err)
 	}
 }

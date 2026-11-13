@@ -10,6 +10,9 @@ var (
 	// ErrNotFound indicates the requested entity does not exist.
 	ErrNotFound = errors.New("not found")
 
+	// ErrAlreadyExists prevents a failed launch from adopting another VM.
+	ErrAlreadyExists = errors.New("instance already exists")
+
 	// ErrTimeout indicates the command timed out.
 	ErrTimeout = errors.New("command timed out")
 )

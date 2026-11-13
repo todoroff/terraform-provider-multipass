@@ -151,14 +151,19 @@ func TestCloudInitAfterRecoveredLaunch(t *testing.T) {
 			defer cancel()
 			calls := 0
 			var recoveryCtx context.Context
+			launched := false
 			r := &instanceResource{commandTimeout: 20 * time.Millisecond, client: &testClient{
 				launchInstance: func(launchCtx context.Context, _ models.LaunchOptions) error {
+					launched = true
 					if tc.expire {
 						<-launchCtx.Done()
 					}
 					return multipasscli.ErrTimeout
 				},
 				listInstances: func(callCtx context.Context, _ bool) ([]models.Instance, error) {
+					if !launched {
+						return nil, nil
+					}
 					recoveryCtx = callCtx
 					if tc.cancel {
 						cancel()

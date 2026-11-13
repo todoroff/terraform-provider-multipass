@@ -332,44 +332,48 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	createCtx, createCancel := context.WithTimeout(ctx, createTimeout)
 	defer createCancel()
 
-	if err := r.client.LaunchInstance(createCtx, opts); err != nil {
-		if !errors.Is(err, multipasscli.ErrTimeout) {
-			resp.Diagnostics.AddError("Failed to launch instance", err.Error())
+	instances, err := r.client.ListInstances(createCtx, true)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to check instance name", err.Error())
+		return
+	}
+	for _, instance := range instances {
+		if instance.Name == opts.Name {
+			resp.Diagnostics.AddError("Instance already exists", fmt.Sprintf("Instance %q already exists. Import it before managing it with Terraform.", opts.Name))
 			return
 		}
-
-		// Launch timed out. The Multipass daemon may still be creating the
-		// instance in the background. Poll to see if it becomes available.
-		tflog.Warn(ctx, "Launch command timed out, checking if instance was created by daemon", map[string]any{
-			"name": opts.Name,
-		})
-
-		recoveryTimeout := 5 * time.Minute
-		recoveryCtx, recoveryCancel := context.WithTimeout(ctx, recoveryTimeout)
-		defer recoveryCancel()
-		if recoverErr := r.waitForInstanceAfterTimeout(recoveryCtx, opts.Name, recoveryTimeout); recoverErr != nil {
-			resp.Diagnostics.AddError(
-				"Launch timed out and instance not found",
-				fmt.Sprintf(
-					"The launch command timed out and the instance %q could not be found after waiting an additional %s. "+
-						"Consider increasing the provider command_timeout or check 'multipass list' to see if the instance is still being created. "+
-						"Original error: %s",
-					opts.Name, recoveryTimeout, err.Error(),
-				),
-			)
-			return
+	}
+	launchErr := r.client.LaunchInstance(createCtx, opts)
+	if launchErr != nil {
+		if !errors.Is(launchErr, multipasscli.ErrTimeout) {
+			resp.Diagnostics.AddError("Failed to launch instance", launchErr.Error())
+			if errors.Is(launchErr, multipasscli.ErrAlreadyExists) {
+				return
+			}
+			checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			// The name was absent before launch; retain partial creation for cleanup.
+			if _, err := r.getInstanceFromList(checkCtx, opts.Name); err != nil {
+				return
+			}
+		} else {
+			tflog.Warn(ctx, "Launch command timed out, checking if instance was created by daemon", map[string]any{"name": opts.Name})
+			recoveryTimeout := 5 * time.Minute
+			recoveryCtx, recoveryCancel := context.WithTimeout(ctx, recoveryTimeout)
+			defer recoveryCancel()
+			if recoverErr := r.waitForInstanceAfterTimeout(recoveryCtx, opts.Name, recoveryTimeout); recoverErr != nil {
+				resp.Diagnostics.AddError("Launch timed out and instance not found", fmt.Sprintf(
+					"The launch command timed out and instance %q was not available after %s of recovery: %v. Check 'multipass list' before retrying. Original error: %s",
+					opts.Name, recoveryTimeout, recoverErr, launchErr))
+				return
+			}
+			// Cloud-init shares the remaining recovery budget and request cancellation.
+			createCtx = recoveryCtx
+			resp.Diagnostics.AddWarning("Launch timed out but instance was created", fmt.Sprintf("The launch command timed out, but instance %q was successfully created by the Multipass daemon.", opts.Name))
 		}
-
-		// Cloud-init shares the remaining recovery budget and request cancellation.
-		createCtx = recoveryCtx
-
-		resp.Diagnostics.AddWarning(
-			"Launch timed out but instance was created",
-			fmt.Sprintf("The launch command timed out, but instance %q was successfully created by the Multipass daemon.", opts.Name),
-		)
 	}
 
-	// Launch succeeded: persist the VM even if allocation readback or cloud-init
+	// The VM exists: persist it even if launch, allocation readback or cloud-init
 	// subsequently fails. Resolve computed launch defaults and initialize remote
 	// metadata so a failed refresh cannot leave unknown values in saved state.
 	plan.ID = types.StringValue(opts.Name)
@@ -388,6 +392,11 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	defer func() {
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	}()
+
+	if launchErr != nil && !errors.Is(launchErr, multipasscli.ErrTimeout) {
+		resp.Diagnostics.Append(r.refreshState(ctx, opts.Name, &plan)...)
+		return
+	}
 
 	if plan.WaitForCloudInit.ValueBool() {
 		tflog.Info(ctx, "Waiting for cloud-init to finish", map[string]any{"name": opts.Name})
