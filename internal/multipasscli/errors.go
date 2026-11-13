@@ -42,26 +42,39 @@ func (e *CLIError) Unwrap() error {
 	return e.Err
 }
 
-// Match only complete Multipass 1.17 deprecation notices, never arbitrary stderr.
-func withoutDriverWarning(stderr string) string {
+// Strip only complete, known daemon notices, never arbitrary stderr.
+func withoutKnownWarnings(stderr string) string {
 	const header = "*** Warning! The %s driver is deprecated and will be removed in an upcoming release. ***\n\n"
 	const migration = "When you are ready to have your instances migrated, please stop them (multipass stop --all) and switch to the new Host Compute System (HCS) driver (multipass set local.driver=hcs).\n\n"
 	const recreate = "We recommend switching to the new %s driver as soon as possible (multipass set local.driver=%s). Your instances will not be destroyed but they will be unreachable from the new driver. You can switch back to the old driver for now, but you will need to manually recreate any instances you want to keep in the next release.\n\n"
-	for _, warning := range []string{
+	const legacyHeader = "*** Warning! The %s driver is deprecated and will be removed in an future release. ***\n\n"
+	const blueprint = "*** Warning! Blueprints are deprecated and will be removed in a future release. ***\n\nYou can achieve similar results with cloud-init and other launch options.\nRun `multipass help launch` for more info, or find out more at:\n- https://documentation.ubuntu.com/multipass/en/latest/how-to-guides/manage-instances/launch-customized-instances-with-multipass-and-cloud-init/\n- https://cloudinit.readthedocs.io\n\n"
+	warnings := []string{
+		fmt.Sprintf(legacyHeader, "lxd") + "Instances will no longer be available in Multipass then, but they will remain in LXD.\n\n",
+		fmt.Sprintf(legacyHeader, "libvirt") + "Instances will remain available with the QEMU driver.\n\n",
+		blueprint,
 		fmt.Sprintf(header, "Hyper-V") + migration,
 		fmt.Sprintf(header, "VirtualBox") + fmt.Sprintf(recreate, "Host Compute System (HCS)", "hcs"),
 		fmt.Sprintf(header, "VirtualBox") + fmt.Sprintf(recreate, "Apple Virtualization framework", "applevz"),
-	} {
-		if detail, ok := strings.CutPrefix(stderr, warning); ok {
-			return strings.TrimLeft(detail, "\n")
+	}
+	for {
+		stripped := false
+		for _, warning := range warnings {
+			if detail, ok := strings.CutPrefix(stderr, warning); ok {
+				stderr = strings.TrimLeft(detail, "\n")
+				stripped = true
+				break
+			}
+		}
+		if !stripped {
+			return stderr
 		}
 	}
-	return stderr
 }
 
 // Only absence of the requested entity permits Terraform to discard its state.
 func isNotFoundError(args []string, stderr string) bool {
-	stderr = withoutDriverWarning(stderr)
+	stderr = withoutKnownWarnings(stderr)
 	if len(args) < 2 {
 		return false
 	}

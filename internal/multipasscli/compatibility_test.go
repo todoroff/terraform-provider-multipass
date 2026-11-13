@@ -110,9 +110,18 @@ func TestCommandNotFoundDiagnostics(t *testing.T) {
 const hyperVWarning = "*** Warning! The Hyper-V driver is deprecated and will be removed in an upcoming release. ***\n\nWhen you are ready to have your instances migrated, please stop them (multipass stop --all) and switch to the new Host Compute System (HCS) driver (multipass set local.driver=hcs).\n\n"
 const virtualBoxWarning = "*** Warning! The VirtualBox driver is deprecated and will be removed in an upcoming release. ***\n\nWe recommend switching to the new Host Compute System (HCS) driver as soon as possible (multipass set local.driver=hcs). Your instances will not be destroyed but they will be unreachable from the new driver. You can switch back to the old driver for now, but you will need to manually recreate any instances you want to keep in the next release.\n\n"
 
-func TestDriverWarningDiagnostics(t *testing.T) {
+// Literal utils.cpp and daemon.cpp v1.16.1 diagnostics; preserve upstream wording.
+const lxdWarning = "*** Warning! The lxd driver is deprecated and will be removed in an future release. ***\n\nInstances will no longer be available in Multipass then, but they will remain in LXD.\n\n"
+const libvirtWarning = "*** Warning! The libvirt driver is deprecated and will be removed in an future release. ***\n\nInstances will remain available with the QEMU driver.\n\n"
+const blueprintWarning = "*** Warning! Blueprints are deprecated and will be removed in a future release. ***\n\nYou can achieve similar results with cloud-init and other launch options.\nRun `multipass help launch` for more info, or find out more at:\n- https://documentation.ubuntu.com/multipass/en/latest/how-to-guides/manage-instances/launch-customized-instances-with-multipass-and-cloud-init/\n- https://cloudinit.readthedocs.io\n\n"
+
+func TestWarningDiagnostics(t *testing.T) {
 	appleWarning := strings.ReplaceAll(strings.ReplaceAll(virtualBoxWarning, "Host Compute System (HCS)", "Apple Virtualization framework"), "local.driver=hcs", "local.driver=applevz")
-	for driver, warning := range map[string]string{"hyperv": hyperVWarning, "virtualbox-windows": virtualBoxWarning, "virtualbox-macos": appleWarning} {
+	for driver, warning := range map[string]string{
+		"hyperv": hyperVWarning, "virtualbox-windows": virtualBoxWarning, "virtualbox-macos": appleWarning,
+		"lxd": lxdWarning, "libvirt": libvirtWarning, "blueprint": blueprintWarning,
+		"lxd-blueprint": lxdWarning + blueprintWarning, "libvirt-blueprint": libvirtWarning + blueprintWarning,
+	} {
 		for _, diagnostic := range []struct {
 			args   []string
 			detail string
@@ -145,7 +154,13 @@ instance "vm" does not exist`, ErrNotFound},
 			}
 		}
 	}
-	for _, warning := range []string{"*** Warning! Unknown warning.\n\n", strings.Replace(hyperVWarning, "stop them", "delete them", 1)} {
+	for _, warning := range []string{
+		"*** Warning! Unknown warning.\n\n",
+		strings.Replace(hyperVWarning, "stop them", "delete them", 1),
+		strings.Replace(lxdWarning, "in an future", "in an upcoming", 1),
+		lxdWarning + "*** Warning! Unknown warning.\n\n" + blueprintWarning,
+		strings.TrimSuffix(blueprintWarning, "- https://cloudinit.readthedocs.io\n\n"),
+	} {
 		if isNotFoundError([]string{"info", "vm"}, warning+`info failed: instance "vm" does not exist`) {
 			t.Fatal("unrecognized warning discarded")
 		}
