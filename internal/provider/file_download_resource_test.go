@@ -371,12 +371,32 @@ func TestDirectoryDownloadPermissions(t *testing.T) {
 }
 
 func TestRecursiveDownloadPreservesTerraformDirectory(t *testing.T) {
-	for _, marker := range []string{"main.tf", "project/main.tf", "project/.git/config", "project/nested/terraform.tfstate"} {
+	cases := []struct{ destination, marker string }{
+		{"module", "main.tf"},
+		{"module", "project/main.tf"},
+		{"module", "project/.git/config"},
+		{"module", "project/nested/terraform.tfstate"},
+		{".git", "config"},
+		{".terraform", "providers/metadata"},
+		{".terraform.lock.hcl", "keep"},
+		{"main.tf", "keep"},
+		{"main.tf.json", "keep"},
+		{"terraform.tfstate", "keep"},
+		{"terraform.tfstate.backup", "keep"},
+	}
+	if runtime.GOOS == "windows" {
+		cases = append(cases, struct{ destination, marker string }{".git.", "config"}, struct{ destination, marker string }{".terraform ", "metadata"})
+	}
+	for _, tc := range cases {
 		for _, operation := range []string{"replace", "destroy", "legacy destroy"} {
-			t.Run(marker+"/"+operation, func(t *testing.T) {
+			t.Run(tc.destination+"/"+tc.marker+"/"+operation, func(t *testing.T) {
 				root := t.TempDir()
-				dest := filepath.Join(root, "module")
-				sentinel := filepath.Join(dest, filepath.FromSlash(marker))
+				dest := filepath.Join(root, tc.destination)
+				fixtureDir, err := filepath.Abs(dest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sentinel := filepath.Join(fixtureDir, filepath.FromSlash(tc.marker))
 				if err := os.MkdirAll(filepath.Dir(sentinel), 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -430,7 +450,14 @@ func TestRecursiveDownloadRejectsBroadPaths(t *testing.T) {
 	t.Chdir(working)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, dest := range []string{".", "..", filepath.Join(working, "child", ".."), home, root, filepath.VolumeName(working) + string(os.PathSeparator)} {
+	destinations := []string{".", "..", filepath.Join(working, "child", ".."), home, root, filepath.VolumeName(working) + string(os.PathSeparator)}
+	for _, marker := range []string{".git", ".GIT", ".terraform", ".terraform.lock.hcl", "main.tf", "main.tf.json", "terraform.tfstate", "terraform.tfstate.backup"} {
+		destinations = append(destinations, filepath.Join(root, marker))
+	}
+	if runtime.GOOS == "windows" {
+		destinations = append(destinations, filepath.Join(root, ".git."), filepath.Join(root, ".terraform "))
+	}
+	for _, dest := range destinations {
 		t.Run(dest, func(t *testing.T) {
 			if err := validateDownloadDirectory(dest); err == nil {
 				t.Fatalf("accepted broad path %q", dest)

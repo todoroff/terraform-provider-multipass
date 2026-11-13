@@ -779,6 +779,10 @@ func validateDownloadDirectory(dest string) error {
 		}
 	}
 	return filepath.WalkDir(dest, func(path string, entry fs.DirEntry, walkErr error) error {
+		name := strings.ToLower(filepath.Base(path))
+		if name == ".git" || name == ".terraform" || name == ".terraform.lock.hcl" || strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tf.json") || strings.HasSuffix(name, ".tfstate") || strings.HasSuffix(name, ".tfstate.backup") {
+			return fmt.Errorf("refusing ownership of project directory %q containing %q; use a dedicated download directory", dest, path)
+		}
 		if path == dest && os.IsNotExist(walkErr) {
 			return nil
 		}
@@ -790,10 +794,6 @@ func validateDownloadDirectory(dest string) error {
 				return fmt.Errorf("recursive destination %q is not a directory", dest)
 			}
 			return nil
-		}
-		name := strings.ToLower(entry.Name())
-		if name == ".git" || name == ".terraform" || name == ".terraform.lock.hcl" || strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tf.json") || strings.HasSuffix(name, ".tfstate") || strings.HasSuffix(name, ".tfstate.backup") {
-			return fmt.Errorf("refusing ownership of project directory %q containing %q; use a dedicated download directory", dest, path)
 		}
 		return nil
 	})
