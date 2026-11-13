@@ -171,11 +171,11 @@ func (c *client) GetInstance(ctx context.Context, name string) (*models.Instance
 func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) error {
 	for _, mount := range opts.Mounts {
 		if mount.ReadOnly {
-			return fmt.Errorf("read-only mounts are not supported by the Multipass CLI")
+			return fmt.Errorf("%w: read-only mounts are not supported by the Multipass CLI", ErrNotStarted)
 		}
 	}
 	if opts.CloudInitInline != "" && opts.CloudInitFile != "" {
-		return fmt.Errorf("only one of CloudInitInline or CloudInitFile may be set")
+		return fmt.Errorf("%w: only one of CloudInitInline or CloudInitFile may be set", ErrNotStarted)
 	}
 
 	args := []string{"launch"}
@@ -639,7 +639,7 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 			case aliasWriters <- struct{}{}:
 				defer func() { <-aliasWriters }()
 			case <-ctx.Done():
-				return nil, fmt.Errorf("waiting for alias dictionary: %w", ctx.Err())
+				return nil, fmt.Errorf("%w: waiting for alias dictionary: %w", ErrNotStarted, ctx.Err())
 			}
 		}
 	}
@@ -658,7 +658,10 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
+	}
+	err := cmd.Wait()
 	if err == nil {
 		return stdout.Bytes(), nil
 	}

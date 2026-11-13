@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -239,6 +240,7 @@ func TestLaunchFailureOwnership(t *testing.T) {
 		{name: "existing VM", before: true},
 		{name: "preflight unavailable", listErr: errors.New("daemon unavailable")},
 		{name: "concurrent name collision", after: true, launchErr: multipasscli.ErrAlreadyExists, wantLaunch: true},
+		{name: "deadline before launch", after: true, launchErr: fmt.Errorf("%w: %w", multipasscli.ErrNotStarted, context.DeadlineExceeded), wantLaunch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			launched := false

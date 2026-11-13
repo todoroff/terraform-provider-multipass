@@ -27,7 +27,7 @@ func TestGuestFailuresPreserveExitStatus(t *testing.T) {
 	c, _ := recordingClient(t)
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	if err := c.Exec(ctx, "vm", []string{"command"}); !errors.Is(err, ErrTimeout) {
+	if err := c.Exec(ctx, "vm", []string{"command"}); !errors.Is(err, ErrNotStarted) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline: %v", err)
 	}
 	t.Setenv("MULTIPASS_TEST_RESPONSES", `{"info vm --format json":{"Stderr":"info failed: The following errors occurred:\ninstance \"vm\" does not exist","ExitCode":255}}`)

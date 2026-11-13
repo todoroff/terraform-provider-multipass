@@ -13,6 +13,9 @@ var (
 	// ErrAlreadyExists prevents a failed launch from adopting another VM.
 	ErrAlreadyExists = errors.New("instance already exists")
 
+	// ErrNotStarted indicates the command could not have created or changed a VM.
+	ErrNotStarted = errors.New("command did not start")
+
 	// ErrTimeout indicates the command timed out.
 	ErrTimeout = errors.New("command timed out")
 )

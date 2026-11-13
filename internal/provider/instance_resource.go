@@ -347,7 +347,7 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 	if launchErr != nil {
 		if !errors.Is(launchErr, multipasscli.ErrTimeout) {
 			resp.Diagnostics.AddError("Failed to launch instance", launchErr.Error())
-			if errors.Is(launchErr, multipasscli.ErrAlreadyExists) {
+			if errors.Is(launchErr, multipasscli.ErrAlreadyExists) || errors.Is(launchErr, multipasscli.ErrNotStarted) {
 				return
 			}
 			checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -200,11 +200,38 @@ func TestAliasWriterWaitRespectsContext(t *testing.T) {
 				cancel()
 			}
 			defer cancel()
-			if err := c.DeleteAlias(ctx, "default.alias"); !errors.Is(err, want) {
+			if err := c.LaunchInstance(ctx, models.LaunchOptions{Name: "vm"}); !errors.Is(err, want) || !errors.Is(err, ErrNotStarted) {
 				t.Fatalf("error=%v, want %v", err, want)
 			}
 			if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 				t.Fatal("cancelled writer started the CLI")
+			}
+		})
+	}
+}
+
+func TestLaunchNeverStarted(t *testing.T) {
+	for _, scenario := range []string{"cancelled", "missing executable", "invalid mounts", "invalid cloud-init"} {
+		t.Run(scenario, func(t *testing.T) {
+			c, logPath := recordingClient(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			opts := models.LaunchOptions{Name: "vm"}
+			switch scenario {
+			case "cancelled":
+				cancel()
+			case "missing executable":
+				c.binaryPath = filepath.Join(t.TempDir(), "missing-multipass")
+			case "invalid mounts":
+				opts.Mounts = []models.Mount{{ReadOnly: true}}
+			case "invalid cloud-init":
+				opts.CloudInitInline, opts.CloudInitFile = "inline", "file"
+			}
+			if err := c.LaunchInstance(ctx, opts); !errors.Is(err, ErrNotStarted) {
+				t.Fatalf("pre-start failure not classified: %v", err)
+			}
+			if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+				t.Fatal("CLI started")
 			}
 		})
 	}
