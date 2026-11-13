@@ -371,48 +371,50 @@ func TestDirectoryDownloadPermissions(t *testing.T) {
 }
 
 func TestRecursiveDownloadPreservesTerraformDirectory(t *testing.T) {
-	for _, operation := range []string{"replace", "destroy", "legacy destroy"} {
-		t.Run(operation, func(t *testing.T) {
-			root := t.TempDir()
-			dest := filepath.Join(root, "module")
-			if err := os.Mkdir(dest, 0700); err != nil {
-				t.Fatal(err)
-			}
-			sentinel := filepath.Join(dest, "main.tf")
-			if err := os.WriteFile(sentinel, []byte("configuration"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			// Every mutation in this regression is confined to this temporary module.
-			if rel, err := filepath.Rel(root, dest); err != nil || !filepath.IsLocal(rel) || rel == "." {
-				t.Fatal("unsafe fixture")
-			}
-			r := &fileDownloadResource{}
-			if operation == "replace" {
-				model := fileDownloadResourceModel{Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
-				source := filepath.Join(root, "source")
-				if err := os.Mkdir(source, 0700); err != nil {
+	for _, marker := range []string{"main.tf", "project/main.tf", "project/.git/config", "project/nested/terraform.tfstate"} {
+		for _, operation := range []string{"replace", "destroy", "legacy destroy"} {
+			t.Run(marker+"/"+operation, func(t *testing.T) {
+				root := t.TempDir()
+				dest := filepath.Join(root, "module")
+				sentinel := filepath.Join(dest, filepath.FromSlash(marker))
+				if err := os.MkdirAll(filepath.Dir(sentinel), 0700); err != nil {
 					t.Fatal(err)
 				}
-				if d := r.copyDirectory(source, dest, &model); !d.HasError() {
-					t.Error("module directory accepted for replacement")
+				if err := os.WriteFile(sentinel, []byte("configuration"), 0600); err != nil {
+					t.Fatal(err)
 				}
-			} else {
-				s := resourceSchema(r)
-				values := map[string]any{"id": "download", "destination": dest, "recursive": true}
-				if operation == "destroy" {
-					values["resolved_destination"] = dest
+				// Every mutation in this regression is confined to this temporary module.
+				if rel, err := filepath.Rel(root, dest); err != nil || !filepath.IsLocal(rel) || rel == "." {
+					t.Fatal("unsafe fixture")
 				}
-				state := tfsdk.State{Schema: s, Raw: resourceValue(s, values)}
-				resp := resource.DeleteResponse{State: state}
-				r.Delete(context.Background(), resource.DeleteRequest{State: state}, &resp)
-				if !resp.Diagnostics.HasError() || resp.State.Raw.IsNull() {
-					t.Error("unsafe destroy did not retain state with an error")
+				r := &fileDownloadResource{}
+				if operation == "replace" {
+					model := fileDownloadResourceModel{Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
+					source := filepath.Join(root, "source")
+					if err := os.Mkdir(source, 0700); err != nil {
+						t.Fatal(err)
+					}
+					if d := r.copyDirectory(source, dest, &model); !d.HasError() {
+						t.Error("module directory accepted for replacement")
+					}
+				} else {
+					s := resourceSchema(r)
+					values := map[string]any{"id": "download", "destination": dest, "recursive": true}
+					if operation == "destroy" {
+						values["resolved_destination"] = dest
+					}
+					state := tfsdk.State{Schema: s, Raw: resourceValue(s, values)}
+					resp := resource.DeleteResponse{State: state}
+					r.Delete(context.Background(), resource.DeleteRequest{State: state}, &resp)
+					if !resp.Diagnostics.HasError() || resp.State.Raw.IsNull() {
+						t.Error("unsafe destroy did not retain state with an error")
+					}
 				}
-			}
-			if data, err := os.ReadFile(sentinel); err != nil || string(data) != "configuration" {
-				t.Fatalf("Terraform configuration lost: %q %v", data, err)
-			}
-		})
+				if data, err := os.ReadFile(sentinel); err != nil || string(data) != "configuration" {
+					t.Fatalf("Terraform configuration lost: %q %v", data, err)
+				}
+			})
+		}
 	}
 }
 
@@ -433,10 +435,13 @@ func TestRecursiveDownloadRejectsBroadPaths(t *testing.T) {
 			if err := validateDownloadDirectory(dest); err == nil {
 				t.Fatalf("accepted broad path %q", dest)
 			}
-			r := &fileDownloadResource{client: &testClient{}}
-			model := fileDownloadResourceModel{Destination: types.StringValue(dest), Recursive: types.BoolValue(true)}
-			if d := r.downloadAndWrite(context.Background(), &model); !d.HasError() {
+			r := &fileDownloadResource{client: &directDownloadClient{transfer: func(multipasscli.TransferOptions) error {
 				t.Fatal("unsafe download reached transfer")
+				return nil
+			}}}
+			model := fileDownloadResourceModel{Instance: types.StringValue("vm"), Source: types.StringValue("/payload"), Destination: types.StringValue(dest), Recursive: types.BoolValue(true)}
+			if d := r.downloadAndWrite(context.Background(), &model); !d.HasError() || d[0].Summary() != "Unsafe recursive destination" {
+				t.Fatalf("wrong diagnostic for unsafe destination: %v", d)
 			}
 		})
 	}
@@ -516,5 +521,47 @@ func TestDownloadedFilesArePrivate(t *testing.T) {
 				t.Fatalf("download exposes secrets: mode=%o, want 600", info.Mode().Perm())
 			}
 		})
+	}
+}
+
+func TestDownloadDirectoryValidationDoesNotFollowNestedLinks(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	dest := filepath.Join(root, "output")
+	for _, dir := range []string{project, dest} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(project, "main.tf"), []byte("configuration"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(project, filepath.Join(dest, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := validateDownloadDirectory(dest); err != nil {
+		t.Fatalf("followed nested symlink: %v", err)
+	}
+}
+
+func TestDownloadDirectoryValidationRejectsUnreadableTree(t *testing.T) {
+	dest := t.TempDir()
+	file := filepath.Join(dest, "regular-file")
+	if err := os.WriteFile(file, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDownloadDirectory(file); err == nil {
+		t.Fatal("accepted regular file as directory")
+	}
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("POSIX permissions require an unprivileged user")
+	}
+	nested := filepath.Join(dest, "unreadable")
+	if err := os.Mkdir(nested, 0000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(nested, 0700)
+	if err := validateDownloadDirectory(dest); err == nil {
+		t.Fatal("unreadable subtree accepted")
 	}
 }

@@ -774,18 +774,23 @@ func validateDownloadDirectory(dest string) error {
 			return fmt.Errorf("refusing ownership of %q because it contains the working or home directory", dest)
 		}
 	}
-	entries, err := os.ReadDir(dest)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
+	return filepath.WalkDir(dest, func(path string, entry fs.DirEntry, walkErr error) error {
+		if path == dest && os.IsNotExist(walkErr) {
+			return nil
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == dest {
+			if !entry.IsDir() {
+				return fmt.Errorf("recursive destination %q is not a directory", dest)
+			}
+			return nil
+		}
 		name := strings.ToLower(entry.Name())
 		if name == ".git" || name == ".terraform" || name == ".terraform.lock.hcl" || strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tf.json") || strings.HasSuffix(name, ".tfstate") || strings.HasSuffix(name, ".tfstate.backup") {
-			return fmt.Errorf("refusing ownership of project directory %q containing %q; use a dedicated download directory", dest, entry.Name())
+			return fmt.Errorf("refusing ownership of project directory %q containing %q; use a dedicated download directory", dest, path)
 		}
-	}
-	return nil
+		return nil
+	})
 }
