@@ -246,9 +246,9 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 	if _, err := c.runWithStdin(ctx, stdin, args...); err != nil {
 		var cliErr *CLIError
 		if errors.As(err, &cliErr) {
-			detail := strings.TrimPrefix(cliErr.Stderr, "launch failed: ")
+			detail, ok := strings.CutPrefix(cliErr.Stderr, "launch failed: ")
 			detail = strings.TrimPrefix(detail, "The following errors occurred:\n")
-			if detail == fmt.Sprintf("instance %q already exists", opts.Name) {
+			if ok && (detail == fmt.Sprintf("instance %q already exists", opts.Name) || detail == fmt.Sprintf("instance %q is being prepared", opts.Name)) {
 				return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
 			}
 		}

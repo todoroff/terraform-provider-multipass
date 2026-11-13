@@ -132,10 +132,29 @@ func TestDeleteInstanceScopesPurge(t *testing.T) {
 }
 
 func TestLaunchNameCollision(t *testing.T) {
-	c, _ := recordingClient(t)
-	t.Setenv("MULTIPASS_TEST_RESPONSES", `{"launch --name vm --timeout 5":{"Stderr":"launch failed: instance \"vm\" already exists","ExitCode":1}}`)
-	if err := c.LaunchInstance(context.Background(), models.LaunchOptions{Name: "vm"}); !errors.Is(err, ErrAlreadyExists) {
-		t.Fatalf("collision not classified: %v", err)
+	for _, tc := range []struct {
+		stderr    string
+		collision bool
+	}{
+		{`launch failed: instance "vm" already exists`, true},
+		{`launch failed: instance "vm" is being prepared`, true},
+		{"launch failed: The following errors occurred:\ninstance \"vm\" is being prepared", true},
+		{`launch failed: instance "other" is being prepared`, false},
+		{"launch failed: instance \"vm\" is being prepared\npermission denied", false},
+		{`instance "vm" is being prepared`, false},
+		{`unknown failure: launch failed: instance "vm" is being prepared`, false},
+	} {
+		t.Run(tc.stderr, func(t *testing.T) {
+			c, _ := recordingClient(t)
+			response, err := json.Marshal(map[string]any{"launch --name vm --timeout 5": map[string]any{"Stderr": tc.stderr, "ExitCode": 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("MULTIPASS_TEST_RESPONSES", string(response))
+			if err := c.LaunchInstance(context.Background(), models.LaunchOptions{Name: "vm"}); err == nil || errors.Is(err, ErrAlreadyExists) != tc.collision {
+				t.Fatalf("collision=%v; error=%v", tc.collision, err)
+			}
+		})
 	}
 }
 
