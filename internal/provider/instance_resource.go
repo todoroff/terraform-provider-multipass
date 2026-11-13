@@ -992,6 +992,7 @@ func isCloudInitSSHDisconnect(err error) bool {
 	for _, prefix := range []string{
 		"exec failed: ssh connection failed: ",
 		"exec failed: [ssh client] channel creation failed: ",
+		"exec failed: [ssh client] could not obtain exit state: ",
 		"exec failed: [ssh proc] failed to open session channel: ",
 	} {
 		if strings.HasPrefix(cliErr.Stderr, prefix) && strings.Contains(cliErr.Stderr[len(prefix):], "Socket error:") {

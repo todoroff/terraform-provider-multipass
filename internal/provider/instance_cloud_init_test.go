@@ -42,6 +42,7 @@ func TestCloudInitSSHDisconnectClassification(t *testing.T) {
 	}{
 		{"exec failed: ssh connection failed: 'Socket error: Unknown error'", exit255, true},
 		{"exec failed: [ssh client] channel creation failed: 'Socket error: Unknown error'", exit255, true},
+		{"exec failed: [ssh client] could not obtain exit state: 'Socket error: disconnected'", exit255, true},
 		{"exec failed: [ssh proc] failed to open session channel: 'Socket error: disconnected'", exit255, true},
 		{"exec failed: ssh connection failed: 'Socket error: Connection refused'", exit255, true},
 		{"exec failed: ssh connection failed: 'Authentication failed'", exit255, false},
