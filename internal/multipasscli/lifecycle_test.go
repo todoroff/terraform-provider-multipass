@@ -31,6 +31,22 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			os.Exit(2)
 		}
+		if dictionary := os.Getenv("MULTIPASS_TEST_ALIAS_DICTIONARY"); dictionary != "" {
+			data, err := os.ReadFile(dictionary)
+			if err != nil {
+				os.Exit(3)
+			}
+			entries := map[string]bool{}
+			if json.Unmarshal(data, &entries) != nil {
+				os.Exit(3)
+			}
+			time.Sleep(100 * time.Millisecond)
+			entries[strings.Join(os.Args[1:], " ")] = true
+			data, _ = json.Marshal(entries)
+			if os.WriteFile(dictionary, data, 0600) != nil {
+				os.Exit(3)
+			}
+		}
 		var responses map[string]struct {
 			Stdout   string
 			Stderr   string
@@ -120,5 +136,76 @@ func TestLaunchNameCollision(t *testing.T) {
 	t.Setenv("MULTIPASS_TEST_RESPONSES", `{"launch --name vm --timeout 5":{"Stderr":"launch failed: instance \"vm\" already exists","ExitCode":1}}`)
 	if err := c.LaunchInstance(context.Background(), models.LaunchOptions{Name: "vm"}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("collision not classified: %v", err)
+	}
+}
+
+func TestConcurrentAliasWritersAcrossClients(t *testing.T) {
+	first, _ := recordingClient(t)
+	second := &client{binaryPath: first.binaryPath, timeout: first.timeout, serverAddress: "other-daemon:50051"}
+	dictionary := filepath.Join(t.TempDir(), "aliases.json")
+	if err := os.WriteFile(dictionary, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTIPASS_TEST_ALIAS_DICTIONARY", dictionary)
+	operations := []func() error{
+		func() error {
+			return first.CreateAlias(context.Background(), models.Alias{Name: "first", Instance: "vm", Command: "bash"})
+		},
+		func() error {
+			return second.CreateAlias(context.Background(), models.Alias{Name: "second", Instance: "vm", Command: "bash"})
+		},
+		func() error { return first.DeleteAlias(context.Background(), "default.old") },
+		func() error { return second.DeleteInstance(context.Background(), "other-vm", true) },
+		func() error {
+			return first.LaunchInstance(context.Background(), models.LaunchOptions{Name: "blueprint-vm"})
+		},
+	}
+	start := make(chan struct{})
+	results := make(chan error, len(operations))
+	for _, operation := range operations {
+		go func() { <-start; results <- operation() }()
+	}
+	close(start)
+	for range operations {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	data, err := os.ReadFile(dictionary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries map[string]bool
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(operations) {
+		t.Fatalf("concurrent writers lost changes: got %d entries, want %d: %s", len(entries), len(operations), data)
+	}
+}
+
+func TestAliasWriterWaitRespectsContext(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(fmt.Sprint("deadline=", deadline), func(t *testing.T) {
+			c, logPath := recordingClient(t)
+			aliasWriters <- struct{}{}
+			defer func() { <-aliasWriters }()
+			ctx, cancel := context.WithCancel(context.Background())
+			want := context.Canceled
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+				want = context.DeadlineExceeded
+			} else {
+				cancel()
+			}
+			defer cancel()
+			if err := c.DeleteAlias(ctx, "default.alias"); !errors.Is(err, want) {
+				t.Fatalf("error=%v, want %v", err, want)
+			}
+			if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+				t.Fatal("cancelled writer started the CLI")
+			}
+		})
 	}
 }

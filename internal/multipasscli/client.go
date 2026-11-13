@@ -19,6 +19,9 @@ import (
 // emitted by the Multipass CLI on Windows.
 var ansiRegex = regexp.MustCompile(`(\x1b\[[0-9;]*[A-Za-z]|\r\n|\r)`)
 
+// The CLI loads a host-wide alias dictionary at startup and saves it on exit.
+var aliasWriters = make(chan struct{}, 1)
+
 // Client exposes typed helpers for interacting with the Multipass CLI.
 type Client interface {
 	Version(ctx context.Context) (models.VersionInfo, error)
@@ -627,6 +630,18 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.timeout)
 		defer cancel()
+	}
+
+	if len(args) > 0 {
+		switch args[0] {
+		case "alias", "unalias", "delete", "purge", "prefer", "launch":
+			select {
+			case aliasWriters <- struct{}{}:
+				defer func() { <-aliasWriters }()
+			case <-ctx.Done():
+				return nil, fmt.Errorf("waiting for alias dictionary: %w", ctx.Err())
+			}
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, c.binaryPath, args...)

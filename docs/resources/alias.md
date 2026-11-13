@@ -45,3 +45,7 @@ terraform import multipass_alias.ls_workspace ls-workspace
 Creation uses the current Multipass alias context and records it. Refresh and deletion use that recorded context even after switching contexts. Before updating an alias, select its recorded context with `multipass prefer <context>`; the provider refuses a mismatched context before deleting anything. It does not switch the shared CLI context automatically.
 
 Import with `<context>.<name>` when names occur in multiple contexts. Existing unqualified state is resolved by name and recorded instance; ambiguous matches fail instead of selecting an arbitrary alias.
+
+## Concurrent operations
+
+Multipass stores aliases in one client-side dictionary shared across daemon addresses. The provider serializes commands that can change that dictionary across all provider configurations in its process. This includes instance deletion and launch (older Multipass blueprints can create aliases). Waiting honors the operation timeout and cancellation. Avoid concurrent alias changes from other Terraform processes or manual CLI sessions; those processes do not share the provider lock.
