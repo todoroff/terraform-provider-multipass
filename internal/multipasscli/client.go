@@ -645,11 +645,11 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 	}
 
 	stdoutStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stdout.String(), ""))
-	stderrStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stderr.String(), ""))
+	stderrStr := strings.TrimSpace(ansiRegex.ReplaceAllString(strings.ReplaceAll(stderr.String(), "\r\n", "\n"), ""))
 
 	// Guest stderr is arbitrary application output, not a daemon diagnostic.
 	guestCommand := len(args) > 0 && args[0] == "exec"
-	if !guestCommand && (strings.Contains(stderrStr, "does not exist") || strings.Contains(stderrStr, "not found")) {
+	if isNotFoundError(args, stderrStr) {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, stderrStr)
 	}
 
