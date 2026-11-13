@@ -369,3 +369,89 @@ func TestDirectoryDownloadPermissions(t *testing.T) {
 		})
 	}
 }
+
+func TestRecursiveDownloadPreservesTerraformDirectory(t *testing.T) {
+	for _, operation := range []string{"replace", "destroy", "legacy destroy"} {
+		t.Run(operation, func(t *testing.T) {
+			root := t.TempDir()
+			dest := filepath.Join(root, "module")
+			if err := os.Mkdir(dest, 0700); err != nil {
+				t.Fatal(err)
+			}
+			sentinel := filepath.Join(dest, "main.tf")
+			if err := os.WriteFile(sentinel, []byte("configuration"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Every mutation in this regression is confined to this temporary module.
+			if rel, err := filepath.Rel(root, dest); err != nil || !filepath.IsLocal(rel) || rel == "." {
+				t.Fatal("unsafe fixture")
+			}
+			r := &fileDownloadResource{}
+			if operation == "replace" {
+				model := fileDownloadResourceModel{Overwrite: types.BoolValue(true), CreateParents: types.BoolValue(true)}
+				source := filepath.Join(root, "source")
+				if err := os.Mkdir(source, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if d := r.copyDirectory(source, dest, &model); !d.HasError() {
+					t.Error("module directory accepted for replacement")
+				}
+			} else {
+				s := resourceSchema(r)
+				values := map[string]any{"id": "download", "destination": dest, "recursive": true}
+				if operation == "destroy" {
+					values["resolved_destination"] = dest
+				}
+				state := tfsdk.State{Schema: s, Raw: resourceValue(s, values)}
+				resp := resource.DeleteResponse{State: state}
+				r.Delete(context.Background(), resource.DeleteRequest{State: state}, &resp)
+				if !resp.Diagnostics.HasError() || resp.State.Raw.IsNull() {
+					t.Error("unsafe destroy did not retain state with an error")
+				}
+			}
+			if data, err := os.ReadFile(sentinel); err != nil || string(data) != "configuration" {
+				t.Fatalf("Terraform configuration lost: %q %v", data, err)
+			}
+		})
+	}
+}
+
+func TestRecursiveDownloadRejectsBroadPaths(t *testing.T) {
+	root := t.TempDir()
+	working := filepath.Join(root, "project")
+	home := filepath.Join(root, "home")
+	for _, dir := range []string{working, home} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(working)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, dest := range []string{".", "..", filepath.Join(working, "child", ".."), home, root, filepath.VolumeName(working) + string(os.PathSeparator)} {
+		t.Run(dest, func(t *testing.T) {
+			if err := validateDownloadDirectory(dest); err == nil {
+				t.Fatalf("accepted broad path %q", dest)
+			}
+			r := &fileDownloadResource{client: &testClient{}}
+			model := fileDownloadResourceModel{Destination: types.StringValue(dest), Recursive: types.BoolValue(true)}
+			if d := r.downloadAndWrite(context.Background(), &model); !d.HasError() {
+				t.Fatal("unsafe download reached transfer")
+			}
+		})
+	}
+	for _, dest := range []string{filepath.Join(working, "downloads"), filepath.Join(home, "downloads"), filepath.Join(root, "output")} {
+		if err := validateDownloadDirectory(dest); err != nil {
+			t.Fatalf("dedicated output rejected: %v", err)
+		}
+	}
+	t.Run("symlink to protected directory", func(t *testing.T) {
+		link := filepath.Join(root, "home-link")
+		if err := os.Symlink(home, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if err := validateDownloadDirectory(link); err == nil {
+			t.Fatal("symlink bypassed protection")
+		}
+	})
+}
