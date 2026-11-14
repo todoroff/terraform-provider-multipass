@@ -3,6 +3,7 @@ package multipasscli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,22 @@ func TestMain(m *testing.M) {
 		f.Close()
 		if err != nil {
 			os.Exit(2)
+		}
+		if dictionary := os.Getenv("MULTIPASS_TEST_ALIAS_DICTIONARY"); dictionary != "" {
+			data, err := os.ReadFile(dictionary)
+			if err != nil {
+				os.Exit(3)
+			}
+			entries := map[string]bool{}
+			if json.Unmarshal(data, &entries) != nil {
+				os.Exit(3)
+			}
+			time.Sleep(100 * time.Millisecond)
+			entries[strings.Join(os.Args[1:], " ")] = true
+			data, _ = json.Marshal(entries)
+			if os.WriteFile(dictionary, data, 0600) != nil {
+				os.Exit(3)
+			}
 		}
 		var responses map[string]struct {
 			Stdout   string
@@ -109,6 +126,131 @@ func TestDeleteInstanceScopesPurge(t *testing.T) {
 			}
 			if decoder.More() {
 				t.Fatal("unexpected additional command; global purge must never be used")
+			}
+		})
+	}
+}
+
+func TestLaunchNameCollision(t *testing.T) {
+	for _, tc := range []struct {
+		stderr    string
+		collision bool
+	}{
+		{`launch failed: instance "vm" already exists`, true},
+		{`launch failed: instance "vm" is being prepared`, true},
+		{"launch failed: The following errors occurred:\ninstance \"vm\" is being prepared", true},
+		{`launch failed: instance "other" is being prepared`, false},
+		{"launch failed: instance \"vm\" is being prepared\npermission denied", false},
+		{`instance "vm" is being prepared`, false},
+		{`unknown failure: launch failed: instance "vm" is being prepared`, false},
+	} {
+		t.Run(tc.stderr, func(t *testing.T) {
+			c, _ := recordingClient(t)
+			response, err := json.Marshal(map[string]any{"launch --name vm --timeout 5": map[string]any{"Stderr": tc.stderr, "ExitCode": 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("MULTIPASS_TEST_RESPONSES", string(response))
+			if err := c.LaunchInstance(context.Background(), models.LaunchOptions{Name: "vm"}); err == nil || errors.Is(err, ErrAlreadyExists) != tc.collision {
+				t.Fatalf("collision=%v; error=%v", tc.collision, err)
+			}
+		})
+	}
+}
+
+func TestConcurrentAliasWritersAcrossClients(t *testing.T) {
+	first, _ := recordingClient(t)
+	second := &client{binaryPath: first.binaryPath, timeout: first.timeout, serverAddress: "other-daemon:50051"}
+	dictionary := filepath.Join(t.TempDir(), "aliases.json")
+	if err := os.WriteFile(dictionary, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTIPASS_TEST_ALIAS_DICTIONARY", dictionary)
+	operations := []func() error{
+		func() error {
+			return first.CreateAlias(context.Background(), models.Alias{Name: "first", Instance: "vm", Command: "bash"})
+		},
+		func() error {
+			return second.CreateAlias(context.Background(), models.Alias{Name: "second", Instance: "vm", Command: "bash"})
+		},
+		func() error { return first.DeleteAlias(context.Background(), "default.old") },
+		func() error { return second.DeleteInstance(context.Background(), "other-vm", true) },
+		func() error {
+			return first.LaunchInstance(context.Background(), models.LaunchOptions{Name: "blueprint-vm"})
+		},
+	}
+	start := make(chan struct{})
+	results := make(chan error, len(operations))
+	for _, operation := range operations {
+		go func() { <-start; results <- operation() }()
+	}
+	close(start)
+	for range operations {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	data, err := os.ReadFile(dictionary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries map[string]bool
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(operations) {
+		t.Fatalf("concurrent writers lost changes: got %d entries, want %d: %s", len(entries), len(operations), data)
+	}
+}
+
+func TestAliasWriterWaitRespectsContext(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(fmt.Sprint("deadline=", deadline), func(t *testing.T) {
+			c, logPath := recordingClient(t)
+			aliasWriters <- struct{}{}
+			defer func() { <-aliasWriters }()
+			ctx, cancel := context.WithCancel(context.Background())
+			want := context.Canceled
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+				want = context.DeadlineExceeded
+			} else {
+				cancel()
+			}
+			defer cancel()
+			if err := c.LaunchInstance(ctx, models.LaunchOptions{Name: "vm"}); !errors.Is(err, want) || !errors.Is(err, ErrNotStarted) {
+				t.Fatalf("error=%v, want %v", err, want)
+			}
+			if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+				t.Fatal("cancelled writer started the CLI")
+			}
+		})
+	}
+}
+
+func TestLaunchNeverStarted(t *testing.T) {
+	for _, scenario := range []string{"cancelled", "missing executable", "invalid mounts", "invalid cloud-init"} {
+		t.Run(scenario, func(t *testing.T) {
+			c, logPath := recordingClient(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			opts := models.LaunchOptions{Name: "vm"}
+			switch scenario {
+			case "cancelled":
+				cancel()
+			case "missing executable":
+				c.binaryPath = filepath.Join(t.TempDir(), "missing-multipass")
+			case "invalid mounts":
+				opts.Mounts = []models.Mount{{ReadOnly: true}}
+			case "invalid cloud-init":
+				opts.CloudInitInline, opts.CloudInitFile = "inline", "file"
+			}
+			if err := c.LaunchInstance(ctx, opts); !errors.Is(err, ErrNotStarted) {
+				t.Fatalf("pre-start failure not classified: %v", err)
+			}
+			if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+				t.Fatal("CLI started")
 			}
 		})
 	}

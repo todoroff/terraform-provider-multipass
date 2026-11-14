@@ -2,8 +2,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -99,7 +103,7 @@ resource "multipass_file_upload" "ready" {
 					if err != nil {
 						return err
 					}
-					return c.Exec(context.Background(), name, []string{"sh", "-c", `. /etc/os-release; test "$ID" = "$1" && test "$(cat /tmp/terraform-cloud-init-ready)" = ready`, "sh", image})
+					return testAccReadOnlyExec(context.Background(), c, name, []string{"sh", "-c", `. /etc/os-release; test "$ID" = "$1" && test "$(cat /tmp/terraform-cloud-init-ready)" = ready`, "sh", image})
 				}},
 			}})
 		})
@@ -131,7 +135,30 @@ resource "multipass_instance" "test" {
 			if err != nil {
 				return err
 			}
-			return c.Exec(context.Background(), name, []string{"sh", "-c", `test -s /var/tmp/terraform-first-boot && test "$(cat /proc/sys/kernel/random/boot_id)" != "$(cat /var/tmp/terraform-first-boot)"`})
+			return testAccReadOnlyExec(context.Background(), c, name, []string{"sh", "-c", `test -s /var/tmp/terraform-first-boot && test "$(cat /proc/sys/kernel/random/boot_id)" != "$(cat /var/tmp/terraform-first-boot)"`})
 		}},
 	}})
+}
+
+// These assertions only read guest state, so reconnecting cannot repeat a mutation.
+func testAccReadOnlyExec(ctx context.Context, c multipasscli.Client, name string, command []string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := c.Exec(ctx, name, command)
+		var cliErr *multipasscli.CLIError
+		var exitErr *exec.ExitError
+		timeout := errors.As(err, &cliErr) && errors.As(err, &exitErr) && exitErr.ExitCode() == 255 && strings.HasPrefix(cliErr.Stderr, "exec failed: ssh connection failed: 'Timeout connecting to ")
+		if !timeout && !isCloudInitSSHDisconnect(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w; last SSH failure: %v", ctx.Err(), err)
+		case <-time.After(time.Second):
+		}
+	}
 }

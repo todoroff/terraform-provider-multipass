@@ -131,11 +131,15 @@ Disk allocation growth does not guarantee the guest partition and filesystem hav
 
 `mounts.read_only` must be `false` or omitted. The Multipass CLI does not support read-only mounts; setting it to `true` is rejected before launch. A `:ro` suffix is a literal part of a Multipass mount path, not a permissions option.
 
+Creation refuses names that already exist; import those instances explicitly. If launch fails after creating a VM (for example, while mounting), the provider retains it in state and reports the original error so Terraform can replace or destroy it. Do not concurrently create the same instance name outside Terraform.
+
 With `wait_for_cloud_init = true`, a cloud-init failure or timeout fails creation and blocks dependent resources. The created VM remains recorded in Terraform state so it can be destroyed or replaced on retry. Exit code 2 is accepted with a Terraform warning only when cloud-init reports `status: done`, an empty `errors` list, and only `WARNING`/`DEPRECATED` messages in `recoverable_errors`. This allows completed provisioning with warnings, such as Fedora's hostname warning, while module errors, higher-severity messages, and unrecognized results still fail creation.
 
-The initial wait uses `cloud-init status --wait` for compatibility with older guests. JSON status is requested only after exit code 2, using the remaining create timeout. A failed status query still fails creation.
+After a launch timeout, the provider allows up to five additional minutes to find the created VM and finish cloud-init. Both steps share that recovery deadline and respect request cancellation.
 
-Recognized SSH socket disconnects during these status checks are retried once per second within the original create timeout, allowing cloud-init reboots to finish. Cancellation stops retries. Authentication errors, other CLI failures, and actual provisioning errors remain failures; provisioning commands are never rerun by this retry.
+The initial wait uses `cloud-init status --wait` for compatibility with older guests. JSON status is requested only after exit code 2, using the remaining create or recovery timeout. A failed status query still fails creation.
+
+Recognized SSH socket disconnects during these status checks are retried once per second within the active create or recovery timeout, allowing cloud-init reboots to finish. Cancellation stops retries. Authentication errors, other CLI failures, and actual provisioning errors remain failures; provisioning commands are never rerun by this retry.
 
 ## Attributes Reference
 

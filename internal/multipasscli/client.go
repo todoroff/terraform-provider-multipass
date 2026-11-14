@@ -19,6 +19,9 @@ import (
 // emitted by the Multipass CLI on Windows.
 var ansiRegex = regexp.MustCompile(`(\x1b\[[0-9;]*[A-Za-z]|\r\n|\r)`)
 
+// The CLI loads a host-wide alias dictionary at startup and saves it on exit.
+var aliasWriters = make(chan struct{}, 1)
+
 // Client exposes typed helpers for interacting with the Multipass CLI.
 type Client interface {
 	Version(ctx context.Context) (models.VersionInfo, error)
@@ -168,11 +171,11 @@ func (c *client) GetInstance(ctx context.Context, name string) (*models.Instance
 func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) error {
 	for _, mount := range opts.Mounts {
 		if mount.ReadOnly {
-			return fmt.Errorf("read-only mounts are not supported by the Multipass CLI")
+			return fmt.Errorf("%w: read-only mounts are not supported by the Multipass CLI", ErrNotStarted)
 		}
 	}
 	if opts.CloudInitInline != "" && opts.CloudInitFile != "" {
-		return fmt.Errorf("only one of CloudInitInline or CloudInitFile may be set")
+		return fmt.Errorf("%w: only one of CloudInitInline or CloudInitFile may be set", ErrNotStarted)
 	}
 
 	args := []string{"launch"}
@@ -241,6 +244,14 @@ func (c *client) LaunchInstance(ctx context.Context, opts models.LaunchOptions) 
 	args = append(args, "--timeout", fmt.Sprintf("%d", int(cliTimeout.Seconds())))
 
 	if _, err := c.runWithStdin(ctx, stdin, args...); err != nil {
+		var cliErr *CLIError
+		if errors.As(err, &cliErr) {
+			detail, ok := strings.CutPrefix(withoutKnownWarnings(cliErr.Stderr), "launch failed: ")
+			detail = strings.TrimPrefix(detail, "The following errors occurred:\n")
+			if ok && (detail == fmt.Sprintf("instance %q already exists", opts.Name) || detail == fmt.Sprintf("instance %q is being prepared", opts.Name)) {
+				return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
+			}
+		}
 		return err
 	}
 
@@ -621,6 +632,18 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 		defer cancel()
 	}
 
+	if len(args) > 0 {
+		switch args[0] {
+		case "alias", "unalias", "delete", "purge", "prefer", "launch":
+			select {
+			case aliasWriters <- struct{}{}:
+				defer func() { <-aliasWriters }()
+			case <-ctx.Done():
+				return nil, fmt.Errorf("%w: waiting for alias dictionary: %w", ErrNotStarted, ctx.Err())
+			}
+		}
+	}
+
 	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
 	if c.serverAddress != "" {
 		// Set only the child environment so provider aliases can target different
@@ -635,7 +658,10 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
+	}
+	err := cmd.Wait()
 	if err == nil {
 		return stdout.Bytes(), nil
 	}
@@ -645,11 +671,11 @@ func (c *client) runWithStdin(ctx context.Context, stdin []byte, args ...string)
 	}
 
 	stdoutStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stdout.String(), ""))
-	stderrStr := strings.TrimSpace(ansiRegex.ReplaceAllString(stderr.String(), ""))
+	stderrStr := strings.TrimSpace(ansiRegex.ReplaceAllString(strings.ReplaceAll(stderr.String(), "\r\n", "\n"), ""))
 
 	// Guest stderr is arbitrary application output, not a daemon diagnostic.
 	guestCommand := len(args) > 0 && args[0] == "exec"
-	if !guestCommand && (strings.Contains(stderrStr, "does not exist") || strings.Contains(stderrStr, "not found")) {
+	if isNotFoundError(args, stderrStr) {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, stderrStr)
 	}
 

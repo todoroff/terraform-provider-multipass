@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -270,6 +271,10 @@ func (r *fileDownloadResource) Delete(ctx context.Context, req resource.DeleteRe
 		return
 	}
 	if state.Recursive.ValueBool() {
+		if err := validateDownloadDirectory(dest); err != nil {
+			resp.Diagnostics.AddError("Unsafe recursive destination", err.Error())
+			return
+		}
 		err = os.RemoveAll(dest)
 	} else {
 		// A file destination must never recursively remove a directory, even
@@ -317,6 +322,13 @@ func (r *fileDownloadResource) downloadAndWrite(ctx context.Context, model *file
 	if err != nil {
 		diags.AddError("Invalid destination", err.Error())
 		return diags
+	}
+
+	if model.Recursive.ValueBool() {
+		if err := validateDownloadDirectory(dest); err != nil {
+			diags.AddError("Unsafe recursive destination", err.Error())
+			return diags
+		}
 	}
 
 	if r.hostOS == "windows" {
@@ -402,6 +414,10 @@ func (r *fileDownloadResource) copyDirectory(src, dest string, model *fileDownlo
 // Finish and validate the new tree before moving the previous copy aside.
 func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, write func(string) diag.Diagnostics) diag.Diagnostics {
 	var diags diag.Diagnostics
+	if err := validateDownloadDirectory(dest); err != nil {
+		diags.AddError("Unsafe recursive destination", err.Error())
+		return diags
+	}
 	exists := false
 	var mode os.FileMode
 	if stat, err := os.Lstat(dest); err == nil {
@@ -448,6 +464,10 @@ func replaceDownloadDirectory(dest string, model *fileDownloadResourceModel, wri
 	}
 	diags.Append(write(stage)...)
 	if diags.HasError() {
+		return diags
+	}
+	if err := validateDownloadDirectory(stage); err != nil {
+		diags.AddError("Unsafe recursive download", err.Error())
 		return diags
 	}
 	if _, err := hashDirectory(stage); err != nil {
@@ -596,7 +616,7 @@ func (r *fileDownloadResource) writeFileBytes(data []byte, dest string, model *f
 		return diags
 	}
 
-	if err := os.WriteFile(destPath, data, 0o644); err != nil {
+	if err := writeDownloadFile(destPath, bytes.NewReader(data)); err != nil {
 		diags.AddError("Failed to write destination file", err.Error())
 		return diags
 	}
@@ -640,20 +660,11 @@ func extractDownloadTar(data []byte, dest string) diag.Diagnostics {
 				diags.AddError("Failed to create parent directory", err.Error())
 				return diags
 			}
-			out, err := os.Create(targetPath)
-			if err != nil {
-				diags.AddError("Failed to create file", err.Error())
-				return diags
-			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
+			if err := writeDownloadFile(targetPath, tr); err != nil {
 				diags.AddError("Failed to extract file", err.Error())
 				return diags
 			}
-			if err := out.Close(); err != nil {
-				diags.AddError("Failed to close extracted file", err.Error())
-				return diags
-			}
+
 		default:
 			diags.AddError("Unsupported archive entry", fmt.Sprintf("Entry %q has unsupported type %d", hdr.Name, hdr.Typeflag))
 			return diags
@@ -712,14 +723,78 @@ func copyFileContents(src, dest string) error {
 	}
 	defer in.Close()
 
-	out, err := os.Create(dest)
+	return writeDownloadFile(dest, in)
+}
+
+func writeDownloadFile(dest string, source io.Reader) error {
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE, 0o600)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
+	// Restrict existing files before writing any newly downloaded secrets.
+	if err := out.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := out.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, source); err != nil {
 		return err
 	}
 	return out.Close()
+}
+
+// Directory ownership must never include the host's home or Terraform project.
+func validateDownloadDirectory(dest string) error {
+	absolute, err := filepath.Abs(dest)
+	if err != nil {
+		return err
+	}
+	dest = absolute
+	if resolved, err := filepath.EvalSymlinks(dest); err == nil {
+		dest = resolved
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if filepath.Dir(dest) == dest {
+		return fmt.Errorf("refusing ownership of filesystem root %q", dest)
+	}
+	working, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	for _, protected := range []string{working, home} {
+		if resolved, err := filepath.EvalSymlinks(protected); err == nil {
+			protected = resolved
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if rel, err := filepath.Rel(dest, protected); err == nil && filepath.IsLocal(rel) {
+			return fmt.Errorf("refusing ownership of %q because it contains the working or home directory", dest)
+		}
+	}
+	return filepath.WalkDir(dest, func(path string, entry fs.DirEntry, walkErr error) error {
+		name := strings.ToLower(filepath.Base(path))
+		if name == ".git" || name == ".terraform" || name == ".terraform.lock.hcl" || strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tf.json") || strings.HasSuffix(name, ".tfstate") || strings.HasSuffix(name, ".tfstate.backup") {
+			return fmt.Errorf("refusing ownership of project directory %q containing %q; use a dedicated download directory", dest, path)
+		}
+		if path == dest && os.IsNotExist(walkErr) {
+			return nil
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == dest {
+			if !entry.IsDir() {
+				return fmt.Errorf("recursive destination %q is not a directory", dest)
+			}
+			return nil
+		}
+		return nil
+	})
 }

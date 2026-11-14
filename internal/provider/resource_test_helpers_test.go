@@ -86,7 +86,10 @@ func (c *testClient) SetInstanceResource(ctx context.Context, name string, setti
 	return c.setResource(ctx, name, setting, value)
 }
 func (c *testClient) ListInstances(ctx context.Context, refresh bool) ([]models.Instance, error) {
-	return c.listInstances(ctx, refresh)
+	if c.listInstances != nil {
+		return c.listInstances(ctx, refresh)
+	}
+	return nil, nil
 }
 func (c *testClient) StopInstance(ctx context.Context, name string, force bool) error {
 	return c.stopInstance(ctx, name, force)

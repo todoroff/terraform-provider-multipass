@@ -11,6 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
+	"github.com/todoroff/terraform-provider-multipass/internal/models"
 	"github.com/todoroff/terraform-provider-multipass/internal/multipasscli"
 )
 
@@ -38,6 +42,7 @@ func TestCloudInitSSHDisconnectClassification(t *testing.T) {
 	}{
 		{"exec failed: ssh connection failed: 'Socket error: Unknown error'", exit255, true},
 		{"exec failed: [ssh client] channel creation failed: 'Socket error: Unknown error'", exit255, true},
+		{"exec failed: [ssh client] could not obtain exit state: 'Socket error: disconnected'", exit255, true},
 		{"exec failed: [ssh proc] failed to open session channel: 'Socket error: disconnected'", exit255, true},
 		{"exec failed: ssh connection failed: 'Socket error: Connection refused'", exit255, true},
 		{"exec failed: ssh connection failed: 'Authentication failed'", exit255, false},
@@ -127,6 +132,76 @@ func TestCloudInitReconnectCancellation(t *testing.T) {
 			_, err = r.cloudInitStatus(ctx, "vm", "--wait")
 			if calls != 1 || !errors.Is(err, want) {
 				t.Fatalf("cancelled context retried: calls=%d error=%v", calls, err)
+			}
+		})
+	}
+}
+
+func TestCloudInitAfterRecoveredLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		expire, cancel, fail bool
+	}{
+		{name: "expired launch deadline", expire: true},
+		{name: "CLI timeout before deadline"},
+		{name: "cloud-init failure", expire: true, fail: true},
+		{name: "request cancellation", expire: true, cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			var recoveryCtx context.Context
+			launched := false
+			r := &instanceResource{commandTimeout: 20 * time.Millisecond, client: &testClient{
+				launchInstance: func(launchCtx context.Context, _ models.LaunchOptions) error {
+					launched = true
+					if tc.expire {
+						<-launchCtx.Done()
+					}
+					return multipasscli.ErrTimeout
+				},
+				listInstances: func(callCtx context.Context, _ bool) ([]models.Instance, error) {
+					if !launched {
+						return nil, nil
+					}
+					recoveryCtx = callCtx
+					if tc.cancel {
+						cancel()
+					}
+					return []models.Instance{{Name: "vm", State: "Running"}}, nil
+				},
+				execCapture: func(callCtx context.Context, _ string, command []string) ([]byte, error) {
+					calls++
+					if callCtx != recoveryCtx || callCtx.Err() != nil {
+						t.Fatalf("cloud-init did not use the live recovery context: %v", callCtx.Err())
+					}
+					deadline, ok := callCtx.Deadline()
+					if !ok || time.Until(deadline) > 5*time.Minute {
+						t.Fatal("cloud-init lost its bounded recovery deadline")
+					}
+					if !reflect.DeepEqual(command, []string{"cloud-init", "status", "--wait"}) {
+						t.Fatalf("unexpected command: %v", command)
+					}
+					if tc.fail {
+						return nil, errors.New("cloud-init failed")
+					}
+					return nil, nil
+				},
+			}}
+			s := resourceSchema(r)
+			plan := tfsdk.Plan{Schema: s, Raw: resourceValue(s, map[string]any{"name": "vm", "wait_for_cloud_init": true, "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}})}
+			resp := resource.CreateResponse{State: tfsdk.State{Schema: s}}
+			r.Create(ctx, resource.CreateRequest{Plan: plan}, &resp)
+			if resp.Diagnostics.HasError() != (tc.fail || tc.cancel) || (calls == 0) != tc.cancel {
+				t.Fatalf("calls=%d diagnostics=%v", calls, resp.Diagnostics)
+			}
+			var state instanceResourceModel
+			if d := resp.State.Get(context.Background(), &state); d.HasError() {
+				t.Fatal(d)
+			}
+			if state.ID.ValueString() != "vm" {
+				t.Fatal("recovered instance lost from state")
 			}
 		})
 	}

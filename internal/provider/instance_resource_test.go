@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -224,5 +225,60 @@ func TestEmptyInstanceNameRejectedBeforeLaunch(t *testing.T) {
 		if !resp.Diagnostics.HasError() {
 			t.Fatal("invalid name reached launch")
 		}
+	}
+}
+
+func TestLaunchFailureOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		before, after         bool
+		listErr, launchErr    error
+		wantLaunch, wantState bool
+	}{
+		{name: "mount fails after creation", after: true, launchErr: errors.New("mount failed"), wantLaunch: true, wantState: true},
+		{name: "launch fails before creation", launchErr: errors.New("invalid image"), wantLaunch: true},
+		{name: "existing VM", before: true},
+		{name: "preflight unavailable", listErr: errors.New("daemon unavailable")},
+		{name: "concurrent name collision", after: true, launchErr: multipasscli.ErrAlreadyExists, wantLaunch: true},
+		{name: "deadline before launch", after: true, launchErr: fmt.Errorf("%w: %w", multipasscli.ErrNotStarted, context.DeadlineExceeded), wantLaunch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			launched := false
+			r := &instanceResource{commandTimeout: time.Second, client: &testClient{
+				listInstances: func(context.Context, bool) ([]models.Instance, error) {
+					if tc.listErr != nil {
+						return nil, tc.listErr
+					}
+					if (!launched && tc.before) || (launched && tc.after) {
+						return []models.Instance{{Name: "vm", State: "Running"}}, nil
+					}
+					return nil, nil
+				},
+				launchInstance: func(context.Context, models.LaunchOptions) error { launched = true; return tc.launchErr },
+				execCapture: func(context.Context, string, []string) ([]byte, error) {
+					t.Fatal("cloud-init must not run after launch failure")
+					return nil, nil
+				},
+			}}
+			s := resourceSchema(r)
+			resp := resource.CreateResponse{State: tfsdk.State{Schema: s}}
+			plan := tfsdk.Plan{Schema: s, Raw: resourceValue(s, map[string]any{"name": "vm", "wait_for_cloud_init": true, "networks": []tftypes.Value{}, "mounts": []tftypes.Value{}})}
+			r.Create(context.Background(), resource.CreateRequest{Plan: plan}, &resp)
+			if !resp.Diagnostics.HasError() || launched != tc.wantLaunch || !resp.State.Raw.IsNull() != tc.wantState {
+				t.Fatalf("launched=%v state=%v diagnostics=%v", launched, resp.State.Raw, resp.Diagnostics)
+			}
+			if tc.wantState {
+				var state instanceResourceModel
+				if d := resp.State.Get(context.Background(), &state); d.HasError() {
+					t.Fatal(d)
+				}
+				if state.ID.ValueString() != "vm" {
+					t.Fatal("failed VM was not recorded")
+				}
+				if !strings.Contains(resp.Diagnostics[0].Detail(), tc.launchErr.Error()) {
+					t.Fatal("original launch failure lost")
+				}
+			}
+		})
 	}
 }
